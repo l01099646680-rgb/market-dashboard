@@ -698,13 +698,24 @@ function renderCalendar(src){
     const dt=new Date(e.ts);
     const when=`${p(dt.getMonth()+1)}/${p(dt.getDate())} ${p(dt.getHours())}:${p(dt.getMinutes())}`;
     const has=v=>v!=null&&v!=='';
-    const extra=[]; if(has(e.forecast)) extra.push(`예상 ${e.forecast}`); if(has(e.previous)) extra.push(`이전 ${e.previous}`);
-    const vals = extra.length? extra.join(' · ') : '<span style="color:var(--muted)">예정</span>';
-    const past = e.ts < nowMs;
-    return `<a class="cal-row${past?' done':''}" href="https://www.forexfactory.com/calendar" target="_blank" rel="noopener">
+    const past=e.ts<=nowMs;
+    const released=past&&has(e.actual);
+    const state=released?'released':past?'awaiting':'upcoming';
+    const status=released?'발표 완료':past?'결과 확인 중':'발표 예정';
+    const impact=String(e.impact||'low').toLowerCase();
+    const starCount=impact==='high'?3:impact==='medium'?2:1;
+    const stars='★'.repeat(starCount)+'☆'.repeat(3-starCount);
+    const extra=[];
+    if(released) extra.push(`<span class="cal-actual">실제 ${escHtml(e.actual)}</span>`);
+    else if(past) extra.push('<span class="cal-wait">결과 확인 중</span>');
+    if(has(e.forecast)) extra.push(`<span class="cal-forecast">예상 ${escHtml(e.forecast)}</span>`);
+    if(has(e.previous)) extra.push(`<span class="cal-previous">이전 ${escHtml(e.previous)}</span>`);
+    const vals=extra.length?extra.join(' · '):'<span class="cal-forecast">예정</span>';
+    return `<a class="cal-row ${state}" href="https://www.forexfactory.com/calendar" target="_blank" rel="noopener">
       <span class="cal-date">${when}</span>
       <span class="cal-ctry">${CUR[e.country]||e.country}</span>
-      <span class="cal-event">${evKo(e.title)} <span style="color:var(--muted);font-size:10px;">↗ 결과</span></span>
+      <span class="cal-impact ${impact}" title="중요도 ${starCount}/3">${stars}</span>
+      <span class="cal-event">${evKo(e.title)} <span class="cal-status">${status} ↗</span></span>
       <span class="cal-vals">${vals}</span>
     </a>`;
   }).join('');
