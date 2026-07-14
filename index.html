@@ -84,11 +84,11 @@
   <div class="mover-group">
   <div class="mover-group-title">디지털 자산</div>
   <div class="panel">
-    <h2 style="color:var(--up);">코인 급등 TOP 5</h2>
+    <h2 style="color:var(--up);">코인 급등 TOP 10</h2>
     <div id="gainers"><div class="loading">불러오는 중…</div></div>
   </div>
   <div class="panel">
-    <h2 style="color:var(--down);">코인 급락 TOP 5</h2>
+    <h2 style="color:var(--down);">코인 급락 TOP 10</h2>
     <div id="losers"><div class="loading">불러오는 중…</div></div>
   </div>
   </div>
@@ -114,6 +114,13 @@
     <div id="kr-losers"><div class="loading">불러오는 중…</div></div>
   </div>
   </div>
+  <div class="mover-group volatility-group">
+    <div class="mover-group-title">변동성 모니터</div>
+    <div class="panel volatility-panel">
+      <h2>코인 변동성 TOP 10 <span style="color:var(--muted);font-weight:400;letter-spacing:0;">— 등락·장중범위·거래회전율</span></h2>
+      <div id="volatility"><div class="loading">불러오는 중…</div></div>
+    </div>
+  </div>
 </div>
 
 <div class="section-head"><div><h2>경제 캘린더</h2><p>미국·한국·유럽 주요 일정 (KST)</p></div><p>일정을 누르면 실제 결과를 확인할 수 있습니다</p></div>
@@ -136,6 +143,14 @@
 </div>
 
 <footer>자동 갱신: 코인·국내 1분 / 미국주식 10분 · 데이터: CoinGecko · 네이버 증권 · FMP · Yahoo Finance · 이투데이 · 연합뉴스 · 블록미디어</footer>
+
+<div id="stock-modal" class="stock-modal" aria-hidden="true">
+  <button class="stock-backdrop" onclick="closeStockDetail()" aria-label="상세창 닫기"></button>
+  <aside class="stock-drawer" role="dialog" aria-modal="true" aria-labelledby="stock-detail-title">
+    <button class="drawer-close" onclick="closeStockDetail()" aria-label="닫기">×</button>
+    <div id="stock-detail"><div class="loading">회사 정보를 불러오는 중…</div></div>
+  </aside>
+</div>
 
 <script src="app.js"></script>
 </body>

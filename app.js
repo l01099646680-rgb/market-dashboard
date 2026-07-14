@@ -19,6 +19,8 @@ function fmtPrice(n){
 function chgClass(c){ return c>0?'up':(c<0?'down':'flat'); }
 function chgStr(c){ const s=c>0?'+':''; return `${s}${c.toFixed(2)}%`; }
 function arrow(c){ return c>0?'▲':(c<0?'▼':'·'); }
+function escAttr(v){ return String(v??'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escHtml(v){ return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
 /* ---------- 트레이딩뷰 차트 링크 ---------- */
 function tvUrl(sym){ return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(sym)}`; }
@@ -115,11 +117,11 @@ async function loadMovers(){
     const d=await fetchJsonFast(url, v=>Array.isArray(v)&&v.length>0);
     const valid=d.filter(c=>typeof c.price_change_percentage_24h==='number');
     const sorted=[...valid].sort((a,b)=>b.price_change_percentage_24h-a.price_change_percentage_24h);
-    const gain=sorted.slice(0,5), lose=sorted.slice(-5).reverse();
-    const render=arr=>arr.map(c=>{
+    const gain=sorted.slice(0,10), lose=sorted.slice(-10).reverse();
+    const render=arr=>arr.map((c,i)=>{
       const ch=c.price_change_percentage_24h;
       return `<a class="row tv-link" href="${tvUrl(coinTv(c.symbol))}" target="_blank" rel="noopener">
-        <div class="name">${c.symbol.toUpperCase()}</div>
+        <div class="name"><span class="rank">${i+1}</span>${c.symbol.toUpperCase()}<small>${c.name}</small></div>
         <div class="val">
           <div class="price">$${fmtPrice(c.current_price)}</div>
           <div class="chg ${chgClass(ch)}">${arrow(ch)} ${chgStr(ch)}</div>
@@ -128,9 +130,26 @@ async function loadMovers(){
     }).join('');
     $('gainers').innerHTML=render(gain);
     $('losers').innerHTML=render(lose);
+    const volatile=valid.map(c=>{
+      const low=Number(c.low_24h)||0, high=Number(c.high_24h)||0;
+      const range=low>0?((high-low)/low)*100:0;
+      const turnover=c.market_cap>0?(Number(c.total_volume)||0)/c.market_cap*100:0;
+      const move=Math.abs(c.price_change_percentage_24h||0);
+      const score=move*.45+range*.35+Math.min(turnover,25)*.2;
+      return {...c,range,turnover,score};
+    }).filter(c=>c.range>0).sort((a,b)=>b.score-a.score).slice(0,10);
+    $('volatility').innerHTML=volatile.map((c,i)=>`<a class="vol-row tv-link" href="${tvUrl(coinTv(c.symbol))}" target="_blank" rel="noopener">
+      <span class="vol-rank">${String(i+1).padStart(2,'0')}</span>
+      <span class="vol-name">${c.symbol.toUpperCase()}<small>${c.name}</small></span>
+      <span class="vol-metric ${chgClass(c.price_change_percentage_24h)}"><small>24H 등락</small>${chgStr(c.price_change_percentage_24h)}</span>
+      <span class="vol-metric"><small>장중 범위</small>${c.range.toFixed(1)}%</span>
+      <span class="vol-metric"><small>회전율</small>${c.turnover.toFixed(1)}%</span>
+      <span class="vol-score">${c.score.toFixed(1)}</span>
+    </a>`).join('');
   }catch(e){
     $('gainers').innerHTML='<div class="err">불러오기 실패</div>';
     $('losers').innerHTML='<div class="err">불러오기 실패</div>';
+    $('volatility').innerHTML='<div class="err">변동성 데이터를 불러오지 못했어요.</div>';
   }
 }
 
@@ -291,14 +310,14 @@ async function mapPool(items, worker, poolSize){
 const _metricCache={};
 function leaderRows(list, cur){
   return list.map(it=>{
-    const tv = cur==='₩' ? 'KRX:'+it.code : it.sym;
+    const market=cur==='₩'?'KR':'US';
     const d=_metricCache[it.sym];
-    if(!d) return `<a class="row tv-link" href="${tvUrl(tv)}" target="_blank" rel="noopener"><div class="name">${it.name}</div><div class="val"><div class="price flat">—</div></div></a>`;
+    if(!d) return `<button class="row stock-row" data-market="${market}" data-symbol="${escAttr(it.sym)}" data-code="${escAttr(it.code||'')}" data-name="${escAttr(it.name)}" data-price="" data-change="" onclick="openStockDetailFromRow(this)"><div class="name">${it.name}</div><div class="val"><div class="price flat">—</div></div></button>`;
     const valStr = cur==='₩' ? '₩'+d.price.toLocaleString('en-US',{maximumFractionDigits:0}) : '$'+fmtPrice(d.price);
-    return `<a class="row tv-link" href="${tvUrl(tv)}" target="_blank" rel="noopener">
+    return `<button class="row stock-row" data-market="${market}" data-symbol="${escAttr(it.sym)}" data-code="${escAttr(it.code||'')}" data-name="${escAttr(it.name)}" data-price="${escAttr(valStr)}" data-change="${d.ch}" onclick="openStockDetailFromRow(this)">
       <div class="name">${it.name}</div>
       <div class="val"><div class="price">${valStr}</div><div class="chg ${chgClass(d.ch)}">${arrow(d.ch)} ${chgStr(d.ch)}</div></div>
-    </a>`;
+    </button>`;
   }).join('');
 }
 async function loadMetrics(){
@@ -462,12 +481,12 @@ function trimName(n,sym){ n=(n||sym||'').trim(); return n.length>22? n.slice(0,2
 function renderFmpRows(arr){
   return arr.slice(0,10).map((c,i)=>{
     const ch=parsePct(c.changesPercentage);
-    return `<a class="row tv-link" href="${tvUrl(c.symbol)}" target="_blank" rel="noopener">
+    return `<button class="row stock-row" data-market="US" data-symbol="${escAttr(c.symbol)}" data-name="${escAttr(c.name||c.symbol)}" data-price="$${escAttr(fmtPrice(c.price))}" data-change="${ch}" onclick="openStockDetailFromRow(this)">
       <div class="name"><span class="rank">${i+1}</span>${trimName(c.name,c.symbol)}<small>${c.symbol}</small></div>
       <div class="val">
         <div class="price">$${fmtPrice(c.price)}</div>
         <div class="chg ${chgClass(ch)}">${arrow(ch)} ${chgStr(ch)}</div>
-      </div></a>`;
+      </div></button>`;
   }).join('');
 }
 async function loadUSStocks(){
@@ -516,15 +535,93 @@ async function fetchNaverRank(pageUrl){
 }
 function renderKRRows(arr){
   return arr.map((s,i)=>{
-    const open=s.code?`<a class="row tv-link" href="${tvUrl('KRX:'+s.code)}" target="_blank" rel="noopener">`:'<div class="row">';
-    const close=s.code?'</a>':'</div>';
-    return `${open}
+    return `<button class="row stock-row" data-market="KR" data-symbol="${escAttr(s.code)}" data-code="${escAttr(s.code)}" data-name="${escAttr(s.name)}" data-price="${escAttr(s.price)}" data-change="${s.ch}" onclick="openStockDetailFromRow(this)">
     <div class="name"><span class="rank">${i+1}</span>${s.name}</div>
     <div class="val">
       <div class="price">${s.price}</div>
       <div class="chg ${chgClass(s.ch)}">${arrow(s.ch)} ${chgStr(s.ch)}</div>
-    </div>${close}`;
+    </div></button>`;
   }).join('');
+}
+
+/* ---------- 종목 상세: 클릭할 때만 회사 정보·뉴스 요청 ---------- */
+const US_INTRO_KO={
+  AAPL:'아이폰, 맥, 아이패드와 서비스 생태계를 운영하는 글로벌 소비자 기술 기업입니다.',
+  MSFT:'윈도우, 오피스, 애저 클라우드와 인공지능 서비스를 운영하는 소프트웨어 기업입니다.',
+  NVDA:'인공지능 연산과 그래픽 처리에 쓰이는 GPU 및 데이터센터 플랫폼을 설계하는 반도체 기업입니다.',
+  GOOGL:'검색, 유튜브, 디지털 광고, 클라우드와 인공지능 서비스를 운영하는 알파벳의 핵심 기업입니다.',
+  AMZN:'전자상거래, 물류, 구독 서비스와 AWS 클라우드를 운영하는 글로벌 플랫폼 기업입니다.',
+  META:'페이스북, 인스타그램, 왓츠앱과 광고·인공지능 서비스를 운영하는 소셜 플랫폼 기업입니다.',
+  TSLA:'전기자동차, 에너지저장장치와 충전 인프라를 개발·판매하는 기업입니다.'
+};
+const KR_INTRO_KO={
+  '005930':'반도체, 스마트폰, 가전제품을 생산하는 대한민국의 대표 전자기업입니다.',
+  '000660':'D램과 낸드플래시 등 메모리 반도체를 설계·생산하는 기업입니다.',
+  '373220':'전기차와 에너지저장장치용 이차전지를 생산하는 배터리 기업입니다.',
+  '207940':'바이오의약품 위탁개발·생산을 주력으로 하는 바이오 기업입니다.',
+  '005380':'승용차와 상용차, 친환경차를 개발·생산하는 글로벌 자동차 기업입니다.',
+  '035420':'검색, 광고, 커머스, 콘텐츠, 핀테크와 클라우드 서비스를 운영하는 인터넷 플랫폼 기업입니다.',
+  '035720':'메신저, 광고, 콘텐츠, 모빌리티와 금융 서비스를 운영하는 플랫폼 기업입니다.'
+};
+function openStockDetailFromRow(el){
+  openStockDetail({market:el.dataset.market,symbol:el.dataset.symbol,code:el.dataset.code||'',name:el.dataset.name,price:el.dataset.price||'—',change:parseFloat(el.dataset.change)});
+}
+function openStockDetail(stock){
+  const modal=$('stock-modal');
+  modal.classList.add('open'); modal.setAttribute('aria-hidden','false'); document.body.classList.add('modal-open');
+  $('stock-detail').innerHTML=`<div class="detail-kicker">${stock.market==='US'?'미국 주식':'국내 주식'}</div><h2 id="stock-detail-title" class="detail-title">${escHtml(stock.name)}</h2><div class="detail-symbol">${escHtml(stock.symbol||stock.code)}</div><div class="loading" style="margin-top:24px;">회사 정보와 관련 뉴스를 불러오는 중…</div>`;
+  if(stock.market==='US') loadUsStockDetail(stock); else loadKrStockDetail(stock);
+}
+function closeStockDetail(){
+  const modal=$('stock-modal'); if(!modal) return;
+  modal.classList.remove('open'); modal.setAttribute('aria-hidden','true'); document.body.classList.remove('modal-open');
+}
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeStockDetail(); });
+function detailPriceHtml(stock){
+  const ch=Number(stock.change);
+  return `<div class="detail-price"><div><small style="color:var(--muted)">현재 표시 가격</small><br><strong>${escHtml(stock.price||'—')}</strong></div><span class="${chgClass(ch)}">${isNaN(ch)?'—':`${arrow(ch)} ${chgStr(ch)}`}</span></div>`;
+}
+function detailNewsHtml(news){
+  if(!news.length) return '<div class="loading">표시할 관련 뉴스가 없어요.</div>';
+  return news.slice(0,3).map(n=>`<a class="detail-news" href="${escAttr(n.url)}" target="_blank" rel="noopener"><strong>${escHtml(n.title)}</strong><small>${escHtml(n.site||'관련 뉴스')}${n.date?' · '+escHtml(n.date):''}</small></a>`).join('');
+}
+async function loadUsStockDetail(stock){
+  const key=getFmpKey(), sym=String(stock.symbol||'').replace(/\.(KS|KQ)$/,'');
+  let profile=null, news=[];
+  if(key){
+    try{
+      const [pR,nR]=await Promise.all([
+        fetchT(`https://financialmodelingprep.com/stable/profile?symbol=${encodeURIComponent(sym)}&apikey=${encodeURIComponent(key)}`,6500),
+        fetchT(`https://financialmodelingprep.com/stable/news/stock?symbols=${encodeURIComponent(sym)}&page=0&limit=3&apikey=${encodeURIComponent(key)}`,6500)
+      ]);
+      const [p,n]=await Promise.all([pR.json(),nR.json()]);
+      profile=p[0]||null;
+      news=(Array.isArray(n)?n:[]).map(x=>({title:x.title||x.text||'관련 기사',url:x.url||x.link||'#',site:x.site||x.publisher||'',date:(x.publishedDate||x.date||'').slice(0,10)}));
+    }catch(e){}
+  }
+  const intro=US_INTRO_KO[sym]||(profile?.description?profile.description.slice(0,700):`${stock.name}의 업종과 최근 이슈를 확인할 수 있는 종목 상세입니다.`);
+  const sector=profile?.sector||'정보 없음', industry=profile?.industry||'정보 없음';
+  const cap=Number(profile?.marketCap); const capText=cap?`$${(cap/1e9).toLocaleString('en-US',{maximumFractionDigits:1})}B`:'정보 없음';
+  $('stock-detail').innerHTML=`<div class="detail-kicker">미국 주식</div><h2 id="stock-detail-title" class="detail-title">${escHtml(profile?.companyName||stock.name)}</h2><div class="detail-symbol">${escHtml(sym)}</div>${detailPriceHtml(stock)}<div class="detail-meta"><div><small>섹터</small><strong>${escHtml(sector)}</strong></div><div><small>산업</small><strong>${escHtml(industry)}</strong></div><div><small>시가총액</small><strong>${escHtml(capText)}</strong></div><div><small>거래소</small><strong>${escHtml(profile?.exchange||profile?.exchangeShortName||'미국')}</strong></div></div><p class="detail-description">${escHtml(intro)}</p><h3 class="detail-section-title">최근 관련 뉴스</h3>${detailNewsHtml(news)}<div class="detail-actions"><a class="detail-action" href="${tvUrl(sym)}" target="_blank" rel="noopener">TradingView 차트 ↗</a><a class="detail-action" href="https://www.google.com/search?q=${encodeURIComponent(stock.name+' 주식 뉴스')}" target="_blank" rel="noopener">관련 뉴스 더 보기 ↗</a>${profile?.website?`<a class="detail-action" href="${escAttr(profile.website)}" target="_blank" rel="noopener">회사 홈페이지 ↗</a>`:''}</div>`;
+}
+async function loadKrStockDetail(stock){
+  const code=stock.code||stock.symbol, name=stock.name;
+  let intro=KR_INTRO_KO[code]||'', news=[];
+  if(!intro){
+    try{
+      const r=await fetchT(`https://ko.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(name)}`,5000);
+      if(r.ok){ const d=await r.json(); if(d.extract) intro=d.extract.slice(0,600); }
+    }catch(e){}
+  }
+  try{
+    const feed=`https://news.google.com/rss/search?q=${encodeURIComponent(name+' 주식')}&hl=ko&gl=KR&ceid=KR:ko`;
+    const r=await fetchProxyFast(feed,6500); const text=await r.text();
+    const xml=new DOMParser().parseFromString(text,'text/xml');
+    news=[...xml.querySelectorAll('item')].slice(0,3).map(it=>({title:(it.querySelector('title')?.textContent||'관련 기사').trim(),url:(it.querySelector('link')?.textContent||'#').trim(),site:'Google 뉴스',date:(it.querySelector('pubDate')?.textContent||'').slice(0,16)}));
+  }catch(e){}
+  if(!intro) intro=`${name}은 국내 증시에 상장된 기업입니다. 아래 네이버 증권의 기업현황과 관련 뉴스를 통해 주요 사업과 최근 이슈를 확인할 수 있습니다.`;
+  const naverFinance=`https://finance.naver.com/item/main.naver?code=${encodeURIComponent(code)}`;
+  $('stock-detail').innerHTML=`<div class="detail-kicker">국내 주식</div><h2 id="stock-detail-title" class="detail-title">${escHtml(name)}</h2><div class="detail-symbol">${escHtml(code)}</div>${detailPriceHtml(stock)}<div class="detail-meta"><div><small>종목코드</small><strong>${escHtml(code)}</strong></div><div><small>시장</small><strong>한국 증시</strong></div></div><p class="detail-description">${escHtml(intro)}</p><h3 class="detail-section-title">최근 관련 뉴스</h3>${detailNewsHtml(news)}<div class="detail-actions"><a class="detail-action" href="${tvUrl('KRX:'+code)}" target="_blank" rel="noopener">TradingView 차트 ↗</a><a class="detail-action" href="${naverFinance}" target="_blank" rel="noopener">네이버 기업현황 ↗</a><a class="detail-action" href="https://search.naver.com/search.naver?where=news&query=${encodeURIComponent(name)}" target="_blank" rel="noopener">네이버 관련뉴스 ↗</a></div>`;
 }
 let _krCache={gain:null, lose:null};
 async function loadKRStocks(){
