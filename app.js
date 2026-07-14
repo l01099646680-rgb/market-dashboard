@@ -706,9 +706,16 @@ async function loadUsStockDetail(stock){
   renderUsStockDetail(stock,profile,news);
 }
 const KR_DETAIL_KO={
-  '465770':'2023년 STX의 해운·물류 사업부문을 인적분할해 설립된 해운·물류 기업입니다. 벌크선 운항과 선박 대선 서비스를 주력으로 하며, 해상운임·선박 가동률·유가와 글로벌 물동량 변화가 실적에 영향을 줄 수 있습니다.'
+  '465770':'2023년 STX의 해운·물류 사업부문을 인적분할해 설립된 해운·물류 기업입니다. 벌크선 운항과 선박 대선 서비스를 주력으로 하며, 해상운임·선박 가동률·유가와 글로벌 물동량 변화가 실적에 영향을 줄 수 있습니다.',
+  '011090':'주방가구, 붙박이장, 수납가구와 인테리어 제품을 제조·판매하는 가구 기업입니다. 건설사 특판과 대리점·온라인 유통을 통해 제품을 공급하며, 주택 거래량·건설 경기·원자재 가격 변화가 실적에 영향을 줄 수 있습니다.'
 };
-function readKrDetailCache(code){ try{return JSON.parse(localStorage.getItem('krDetail:'+code)||'null');}catch(e){return null;} }
+function readKrDetailCache(code){
+  try{
+    const d=JSON.parse(localStorage.getItem('krDetail:'+code)||'null');
+    if(d?.data?.summary&&/[�]/.test(d.data.summary)){ localStorage.removeItem('krDetail:'+code); return null; }
+    return d;
+  }catch(e){return null;}
+}
 function writeKrDetailCache(code,data){ try{localStorage.setItem('krDetail:'+code,JSON.stringify({...data,savedAt:Date.now()}));}catch(e){} }
 function krInfoMap(data){
   const out={};
@@ -720,7 +727,11 @@ async function fetchKrSummary(code){
   for(const url of [target,proxy?proxy(target):null].filter(Boolean)){
     try{
       const r=await fetchT(url,5500); if(!r.ok) continue;
-      const html=new TextDecoder('euc-kr').decode(await r.arrayBuffer()), doc=new DOMParser().parseFromString(html,'text/html');
+      const buf=await r.arrayBuffer();
+      let html='';
+      try{ html=new TextDecoder('utf-8',{fatal:true}).decode(buf); }
+      catch(e){ html=new TextDecoder('euc-kr').decode(buf); }
+      const doc=new DOMParser().parseFromString(html,'text/html');
       const el=doc.querySelector('.summary_info,#summary_info,.section.cop_analysis .sub_section');
       const text=(el?.textContent||'').replace(/\s+/g,' ').trim();
       if(text.length>35) return text.slice(0,750);
@@ -736,7 +747,7 @@ async function fetchKrCompanyData(code){
 function renderKrStockDetail(stock,data,news){
   const code=stock.code||stock.symbol, name=stock.name, m=krInfoMap(data?.info), ch=Number(stock.change);
   const intro=KR_DETAIL_KO[code]||data?.summary||KR_INTRO_KO[code]||`${name}은(는) 국내 증시에 상장된 기업입니다. 주요 사업, 최근 실적과 자금조달 여부는 기업현황과 공시를 함께 확인하는 것이 좋습니다.`;
-  const market=data?.info?.stockEndType?.name||data?.info?.exchangeName||'한국 증시';
+  const market=data?.info?.stockExchangeType?.nameKor||data?.info?.stockExchangeType?.name||data?.info?.stockEndType?.name||data?.info?.exchangeName||'한국 증시';
   const pick=(...keys)=>keys.map(k=>m[k]).find(v=>v&&v!=='N/A'&&v!=='-')||'확인 필요';
   const cap=pick('marketValue','시가총액'), per=pick('per','PER'), pbr=pick('pbr','PBR'), volume=pick('accumulatedTradingVolume','거래량');
   const high=pick('highPriceOf52Weeks','52주최고'), low=pick('lowPriceOf52Weeks','52주최저'), dividend=pick('dividendYieldRatio','배당수익률');
