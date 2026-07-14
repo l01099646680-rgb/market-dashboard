@@ -88,7 +88,7 @@ function PROXIES(){
 }
 function preferredFetchCandidates(url){
   const my=getProxyBase();
-  if(my) return [`${my}/?url=${encodeURIComponent(url)}`,url];
+  if(my) return [`${my}/?url=${encodeURIComponent(url)}`,url,...PROXIES().slice(1).map(p=>p(url))];
   return [url,...PROXIES().map(p=>p(url))];
 }
 
@@ -717,6 +717,7 @@ function readKrDetailCache(code){
   try{
     const d=JSON.parse(localStorage.getItem('krDetail:'+code)||'null');
     if(d?.data?.summary&&/[�]/.test(d.data.summary)){ localStorage.removeItem('krDetail:'+code); return null; }
+    if(d?.complete&&!d?.data?.info&&!d?.data?.summary&&!d?.news?.length){ localStorage.removeItem('krDetail:'+code); return null; }
     return d;
   }catch(e){return null;}
 }
@@ -728,9 +729,8 @@ function krInfoMap(data){
 }
 async function fetchKrSummary(code){
   const target=`https://finance.naver.com/item/main.naver?code=${encodeURIComponent(code)}`;
-  for(const url of preferredFetchCandidates(target)){
-    try{
-      const r=await fetchT(url,5500); if(!r.ok) continue;
+  const jobs=preferredFetchCandidates(target).map(async url=>{
+      const r=await fetchT(url,5500); if(!r.ok) throw new Error('HTTP '+r.status);
       const buf=await r.arrayBuffer();
       let html='';
       try{ html=new TextDecoder('utf-8',{fatal:true}).decode(buf); }
@@ -738,14 +738,19 @@ async function fetchKrSummary(code){
       const doc=new DOMParser().parseFromString(html,'text/html');
       const el=doc.querySelector('.summary_info,#summary_info,.section.cop_analysis .sub_section');
       const text=(el?.textContent||'').replace(/\s+/g,' ').trim();
-      if(text.length>35) return text.slice(0,750);
-    }catch(e){}
-  }
-  return '';
+      if(text.length<=35) throw new Error('기업개요 없음');
+      return text.slice(0,750);
+  });
+  try{return await Promise.any(jobs);}catch(e){return '';}
 }
 async function fetchKrCompanyInfo(code){
   const url=`https://m.stock.naver.com/api/stock/${encodeURIComponent(code)}/integration`;
-  try{return await fetchJsonOneFallback(url,d=>d&&Array.isArray(d.totalInfos));}catch(e){return null;}
+  const jobs=preferredFetchCandidates(url).map(async candidate=>{
+    const r=await fetchT(candidate,5500); if(!r.ok) throw new Error('HTTP '+r.status);
+    const d=await r.json(); if(!d||!Array.isArray(d.totalInfos)||!d.totalInfos.length) throw new Error('상세정보 없음');
+    return d;
+  });
+  try{return await Promise.any(jobs);}catch(e){return null;}
 }
 function renderKrStockDetail(stock,data,news){
   const code=stock.code||stock.symbol, name=stock.name, m=krInfoMap(data?.info), ch=Number(stock.change);
@@ -772,7 +777,7 @@ async function loadKrStockDetail(stock){
   renderKrStockDetail(stock,data,cached.news||[]);
   const [summary,news]=await Promise.all([summaryJob,newsJob]);
   if(summary) data={...data,summary};
-  writeKrDetailCache(code,{data,news,complete:true});
+  writeKrDetailCache(code,{data,news,complete:Boolean(data.info||data.summary||news.length)});
   if($('stock-modal').dataset.detailKey!==key) return;
   renderKrStockDetail(stock,data,news);
 }
