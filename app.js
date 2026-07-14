@@ -478,11 +478,31 @@ function renderUSKeyPrompt(){
 }
 function parsePct(x){ return parseFloat(String(x).replace(/[()%+,\s]/g,'')); }
 function trimName(n,sym){ n=(n||sym||'').trim(); return n.length>22? n.slice(0,21)+'…' : n; }
+const US_NAME_KO={AAPL:'애플',MSFT:'마이크로소프트',NVDA:'엔비디아',GOOGL:'알파벳',GOOG:'알파벳',AMZN:'아마존',META:'메타',TSLA:'테슬라',VEEE:'트윈 비 파워캣츠'};
+const US_WORD_KO=[
+  [/Twin Vee Powercats/gi,'트윈 비 파워캣츠'],[/Artificial Intelligence/gi,'인공지능'],[/Electric Vehicle/gi,'전기차'],
+  [/Technologies/gi,'테크놀로지스'],[/Technology/gi,'테크놀로지'],[/Therapeutics/gi,'테라퓨틱스'],[/Pharmaceuticals/gi,'파마슈티컬스'],
+  [/Communications/gi,'커뮤니케이션스'],[/International/gi,'인터내셔널'],[/Industries/gi,'인더스트리스'],[/Entertainment/gi,'엔터테인먼트'],
+  [/Acquisition/gi,'애퀴지션'],[/Holdings/gi,'홀딩스'],[/Financial/gi,'파이낸셜'],[/Robotics/gi,'로보틱스'],[/Solutions/gi,'솔루션스'],
+  [/Semiconductor/gi,'세미컨덕터'],[/Biotechnology/gi,'바이오테크놀로지'],[/Medical/gi,'메디컬'],[/Healthcare/gi,'헬스케어'],
+  [/Digital/gi,'디지털'],[/Energy/gi,'에너지'],[/Resources/gi,'리소시스'],[/Systems/gi,'시스템스'],[/Software/gi,'소프트웨어'],
+  [/Power/gi,'파워'],[/Solar/gi,'솔라'],[/Quantum/gi,'퀀텀'],[/Global/gi,'글로벌'],[/American/gi,'아메리칸'],[/United/gi,'유나이티드'],
+  [/Group/gi,'그룹'],[/Motors/gi,'모터스'],[/Networks/gi,'네트웍스'],[/Capital/gi,'캐피털'],[/Health/gi,'헬스'],[/Bio/gi,'바이오'],
+  [/Corporation/gi,'코퍼레이션'],[/Corp\.?/gi,'코퍼레이션'],[/Company/gi,'컴퍼니'],[/\bCo\.?\b/gi,'컴퍼니'],[/\bInc\.?\b/gi,''],[/\bLtd\.?\b/gi,'']
+];
+function koUsName(name,symbol){
+  if(US_NAME_KO[symbol]) return US_NAME_KO[symbol];
+  let out=String(name||symbol||'');
+  for(const [re,ko] of US_WORD_KO) out=out.replace(re,ko);
+  out=out.replace(/[,()]/g,' ').replace(/\s+/g,' ').trim();
+  return out||symbol;
+}
 function renderFmpRows(arr){
   return arr.slice(0,10).map((c,i)=>{
     const ch=parsePct(c.changesPercentage);
-    return `<button class="row stock-row" data-market="US" data-symbol="${escAttr(c.symbol)}" data-name="${escAttr(c.name||c.symbol)}" data-price="$${escAttr(fmtPrice(c.price))}" data-change="${ch}" onclick="openStockDetailFromRow(this)">
-      <div class="name"><span class="rank">${i+1}</span>${trimName(c.name,c.symbol)}<small>${c.symbol}</small></div>
+    const enName=c.name||c.symbol, koName=koUsName(enName,c.symbol);
+    return `<button class="row stock-row" data-market="US" data-symbol="${escAttr(c.symbol)}" data-name="${escAttr(koName)}" data-en-name="${escAttr(enName)}" data-price="$${escAttr(fmtPrice(c.price))}" data-change="${ch}" onclick="openStockDetailFromRow(this)">
+      <div class="name"><span class="rank">${i+1}</span>${trimName(koName,c.symbol)}<small>${trimName(enName,c.symbol)} · ${c.symbol}</small></div>
       <div class="val">
         <div class="price">$${fmtPrice(c.price)}</div>
         <div class="chg ${chgClass(ch)}">${arrow(ch)} ${chgStr(ch)}</div>
@@ -583,7 +603,7 @@ const KR_INTRO_KO={
   '035720':'메신저, 광고, 콘텐츠, 모빌리티와 금융 서비스를 운영하는 플랫폼 기업입니다.'
 };
 function openStockDetailFromRow(el){
-  openStockDetail({market:el.dataset.market,symbol:el.dataset.symbol,code:el.dataset.code||'',name:el.dataset.name,price:el.dataset.price||'—',change:parseFloat(el.dataset.change)});
+  openStockDetail({market:el.dataset.market,symbol:el.dataset.symbol,code:el.dataset.code||'',name:el.dataset.name,enName:el.dataset.enName||el.dataset.name,price:el.dataset.price||'—',change:parseFloat(el.dataset.change)});
 }
 function openStockDetail(stock){
   const modal=$('stock-modal');
@@ -618,37 +638,52 @@ async function fetchGoogleStockNews(query){
     }));
   }catch(e){ return []; }
 }
+function readUsDetailCache(sym){ try{return JSON.parse(localStorage.getItem('usDetail:'+sym)||'null');}catch(e){return null;} }
+function writeUsDetailCache(sym,data){ try{localStorage.setItem('usDetail:'+sym,JSON.stringify({...data,savedAt:Date.now()}));}catch(e){} }
+function mapFmpNews(items){ return (Array.isArray(items)?items:[]).map(x=>({title:x.title||x.text||'관련 기사',url:x.url||x.link||'#',site:x.site||x.publisher||'',date:(x.publishedDate||x.date||'').slice(0,10)})); }
+async function fetchJsonOneFallback(url,accept){
+  const proxy=PROXIES()[0], candidates=[url];
+  if(proxy) candidates.push(proxy(url));
+  for(const candidate of candidates){
+    try{const r=await fetchT(candidate,5500); if(!r.ok) continue; const d=await r.json(); if(accept(d)) return d;}catch(e){}
+  }
+  throw new Error('상세 데이터 없음');
+}
+function renderUsStockDetail(stock,profile,news){
+  const sym=String(stock.symbol||'').replace(/\.(KS|KQ)$/,''), known=US_META_KO[sym]||{};
+  const intro=US_INTRO_KO[sym]||(profile?.description?profile.description.slice(0,900):`${stock.name}은(는) 미국 증시에 상장된 기업입니다. 급등락 종목은 정보가 적은 소형주일 수 있으므로 최근 공시·거래량·뉴스를 함께 확인하세요.`);
+  const sector=profile?.sector||known.sector||'미국 상장기업', industry=profile?.industry||known.industry||'상세 업종 확인 필요';
+  const cap=Number(profile?.marketCap), capText=cap?`$${(cap/1e9).toLocaleString('en-US',{maximumFractionDigits:2})}B`:'Yahoo에서 확인 ↗';
+  const exchange=profile?.exchange||profile?.exchangeShortName||known.exchange||'미국 증시';
+  const country=profile?.country||'미국', ceo=profile?.ceo||'공시에서 확인';
+  const website=profile?.website||known.website||'', ch=Number(stock.change);
+  const yahoo=`https://finance.yahoo.com/quote/${encodeURIComponent(sym)}/`, googleNews=`https://news.google.com/search?q=${encodeURIComponent(stock.name+' '+sym+' stock')}&hl=ko&gl=KR&ceid=KR%3Ako`;
+  const newsHtml=news?.length?detailNewsHtml(news):`<a class="detail-news" href="${googleNews}" target="_blank" rel="noopener"><strong>Google 뉴스에서 ${escHtml(sym)} 최신 기사 바로 보기 ↗</strong><small>자동 기사 목록이 없어도 검색 결과는 바로 열립니다.</small></a>`;
+  const risk=Math.abs(ch)>=20?`<div class="detail-risk"><b>급등락 주의</b> 하루 변동률이 ${escHtml(chgStr(ch))}입니다. 거래정지·증자·합병·저유동성 종목 여부를 공시에서 확인하세요.</div>`:'';
+  $('stock-detail').innerHTML=`<div class="detail-kicker">미국 주식</div><h2 id="stock-detail-title" class="detail-title">${escHtml(stock.name)}</h2><div class="detail-symbol">${escHtml(stock.enName||profile?.companyName||'')} · ${escHtml(sym)}</div>${detailPriceHtml(stock)}${risk}<div class="detail-meta"><div><small>섹터</small><strong>${escHtml(sector)}</strong></div><div><small>산업</small><strong>${escHtml(industry)}</strong></div><div><small>시가총액</small><strong><a href="${yahoo}" target="_blank" rel="noopener" style="color:inherit">${escHtml(capText)}</a></strong></div><div><small>거래소</small><strong>${escHtml(exchange)}</strong></div><div><small>소재 국가</small><strong>${escHtml(country)}</strong></div><div><small>대표자</small><strong>${escHtml(ceo)}</strong></div></div><p class="detail-description">${escHtml(intro)}</p><h3 class="detail-section-title">최근 관련 뉴스</h3>${newsHtml}<div class="detail-actions"><a class="detail-action" href="${tvUrl(sym)}" target="_blank" rel="noopener">TradingView 차트 ↗</a><a class="detail-action" href="${yahoo}" target="_blank" rel="noopener">Yahoo 상세정보 ↗</a><a class="detail-action" href="${googleNews}" target="_blank" rel="noopener">최신 뉴스 ↗</a><a class="detail-action" href="https://www.sec.gov/edgar/search/#/q=${encodeURIComponent(sym)}" target="_blank" rel="noopener">SEC 공시 ↗</a>${website?`<a class="detail-action" href="${escAttr(website)}" target="_blank" rel="noopener">회사 홈페이지 ↗</a>`:''}</div>`;
+}
 async function loadUsStockDetail(stock){
-  const key=getFmpKey(), sym=String(stock.symbol||'').replace(/\.(KS|KQ)$/,'');
-  const detailKey=`US:${stock.code||stock.symbol}`;
-  const known=US_META_KO[sym]||{};
-  const googleNewsPromise=fetchGoogleStockNews(`${stock.name} ${sym} 주식`);
-  let profile=null, news=[];
-  if(key){
-    try{
-      const [pR,nR]=await Promise.all([
-        fetchT(`https://financialmodelingprep.com/stable/profile?symbol=${encodeURIComponent(sym)}&apikey=${encodeURIComponent(key)}`,6500),
-        fetchT(`https://financialmodelingprep.com/stable/news/stock?symbols=${encodeURIComponent(sym)}&page=0&limit=3&apikey=${encodeURIComponent(key)}`,6500)
-      ]);
-      const [p,n]=await Promise.all([pR.json(),nR.json()]);
-      profile=p[0]||null;
-      news=(Array.isArray(n)?n:[]).map(x=>({title:x.title||x.text||'관련 기사',url:x.url||x.link||'#',site:x.site||x.publisher||'',date:(x.publishedDate||x.date||'').slice(0,10)}));
-    }catch(e){}
+  const apiKey=getFmpKey(), sym=String(stock.symbol||'').replace(/\.(KS|KQ)$/,''), detailKey=`US:${stock.code||stock.symbol}`;
+  const cached=readUsDetailCache(sym)||{};
+  renderUsStockDetail(stock,cached.profile||null,cached.news||[]);
+  if(cached.savedAt&&Date.now()-cached.savedAt<30*60*1000&&(cached.profile||cached.news?.length)) return;
+  const googleJob=fetchGoogleStockNews(`${stock.enName||stock.name} ${sym} 주식`);
+  let profile=cached.profile||null, news=cached.news||[];
+  if(apiKey){
+    const profileUrl=`https://financialmodelingprep.com/stable/profile?symbol=${encodeURIComponent(sym)}&apikey=${encodeURIComponent(apiKey)}`;
+    const newsUrl=`https://financialmodelingprep.com/stable/news/stock?symbols=${encodeURIComponent(sym)}&page=0&limit=5&apikey=${encodeURIComponent(apiKey)}`;
+    const [p,n]=await Promise.allSettled([
+      fetchJsonOneFallback(profileUrl,d=>Array.isArray(d)&&d.length>0),
+      fetchJsonOneFallback(newsUrl,d=>Array.isArray(d))
+    ]);
+    if(p.status==='fulfilled') profile=p.value[0]||profile;
+    if(n.status==='fulfilled'&&n.value.length) news=mapFmpNews(n.value);
   }
-  const googleNews=await googleNewsPromise;
-  if(!news.length) news=googleNews;
-  if(!news.length && _allNews.length){
-    const words=[stock.name.toLowerCase(),sym.toLowerCase()];
-    news=_allNews.filter(n=>words.some(w=>String(n.title||'').toLowerCase().includes(w))).slice(0,3)
-      .map(n=>({title:n.title,url:n.link,site:n.src,date:n.date?relTime(n.date):''}));
-  }
-  const intro=US_INTRO_KO[sym]||(profile?.description?profile.description.slice(0,700):`${stock.name}의 업종과 최근 이슈를 확인할 수 있는 종목 상세입니다.`);
-  const sector=profile?.sector||known.sector||'미국 상장기업', industry=profile?.industry||known.industry||'기업 정보';
-  const cap=Number(profile?.marketCap); const capText=cap?`$${(cap/1e9).toLocaleString('en-US',{maximumFractionDigits:1})}B`:'실시간 확인 ↗';
-  const capUrl=`https://finance.yahoo.com/quote/${encodeURIComponent(sym)}/`;
-  const website=profile?.website||known.website||'';
+  const googleNews=await googleJob;
+  if(!news.length&&googleNews.length) news=googleNews;
+  if(profile||news.length) writeUsDetailCache(sym,{profile,news});
   if($('stock-modal').dataset.detailKey!==detailKey) return;
-  $('stock-detail').innerHTML=`<div class="detail-kicker">미국 주식</div><h2 id="stock-detail-title" class="detail-title">${escHtml(profile?.companyName||stock.name)}</h2><div class="detail-symbol">${escHtml(sym)}</div>${detailPriceHtml(stock)}<div class="detail-meta"><div><small>섹터</small><strong>${escHtml(sector)}</strong></div><div><small>산업</small><strong>${escHtml(industry)}</strong></div><div><small>시가총액</small><strong><a href="${capUrl}" target="_blank" rel="noopener" style="color:inherit">${escHtml(capText)}</a></strong></div><div><small>거래소</small><strong>${escHtml(profile?.exchange||profile?.exchangeShortName||known.exchange||'미국 증시')}</strong></div></div><p class="detail-description">${escHtml(intro)}</p><h3 class="detail-section-title">최근 관련 뉴스</h3>${detailNewsHtml(news)}<div class="detail-actions"><a class="detail-action" href="${tvUrl(sym)}" target="_blank" rel="noopener">TradingView 차트 ↗</a><a class="detail-action" href="https://news.google.com/search?q=${encodeURIComponent(stock.name+' '+sym+' 주식')}&hl=ko&gl=KR&ceid=KR%3Ako" target="_blank" rel="noopener">관련 뉴스 더 보기 ↗</a>${website?`<a class="detail-action" href="${escAttr(website)}" target="_blank" rel="noopener">회사 홈페이지 ↗</a>`:''}</div>`;
+  renderUsStockDetail(stock,profile,news);
 }
 async function loadKrStockDetail(stock){
   const code=stock.code||stock.symbol, name=stock.name;

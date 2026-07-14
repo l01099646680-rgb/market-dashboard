@@ -171,6 +171,7 @@
   .upcoming .cal-status{color:#65a9ff}.released .cal-status{color:#36d990}.awaiting .cal-status{color:#ffb020}
   .cal-vals{font-family:var(--mono);font-size:12px;text-align:right;white-space:nowrap;}
   .cal-actual{color:#36d990;font-weight:800}.cal-wait{color:#ffb020;font-weight:700}.cal-forecast{color:#d5e5fb}.cal-previous{color:var(--muted)}
+  .detail-risk{margin:-10px 0 16px;padding:11px 13px;border:1px solid rgba(255,176,32,.35);border-radius:10px;background:rgba(255,176,32,.08);color:#e8c879;font-size:11px;line-height:1.55}.detail-risk b{display:block;color:var(--amber);margin-bottom:2px}
   @media(max-width:520px){ #calendar{grid-template-columns:1fr;} .cal-vals{font-size:11px;} .cal-event{font-size:12px;} }
   @media(max-width:560px){
     .news-time{display:none;}
