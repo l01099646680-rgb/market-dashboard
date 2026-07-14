@@ -86,6 +86,11 @@ function PROXIES(){
   list.push(u=>`https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(u)}`);
   return list;
 }
+function preferredFetchCandidates(url){
+  const my=getProxyBase();
+  if(my) return [`${my}/?url=${encodeURIComponent(url)}`,url];
+  return [url,...PROXIES().map(p=>p(url))];
+}
 
 /* ---------- 코인 가격 ---------- */
 async function loadCrypto(){
@@ -551,7 +556,7 @@ async function fetchNaverRank(pageUrl){
       if(!out.length) throw new Error('종목 표를 찾지 못함');
       return out;
   };
-  const candidates=[pageUrl,...PROXIES().map(p=>p(pageUrl))];
+  const candidates=preferredFetchCandidates(pageUrl);
   const jobs=candidates.map(async url=>{
     const r=await fetchT(url,7000);
     if(!r.ok) throw new Error('HTTP '+r.status);
@@ -642,8 +647,7 @@ function readUsDetailCache(sym){ try{return JSON.parse(localStorage.getItem('usD
 function writeUsDetailCache(sym,data){ try{localStorage.setItem('usDetail:'+sym,JSON.stringify({...data,savedAt:Date.now()}));}catch(e){} }
 function mapFmpNews(items){ return (Array.isArray(items)?items:[]).map(x=>({title:x.title||x.text||'관련 기사',url:x.url||x.link||'#',site:x.site||x.publisher||'',date:(x.publishedDate||x.date||'').slice(0,10)})); }
 async function fetchJsonOneFallback(url,accept){
-  const proxy=PROXIES()[0], candidates=[url];
-  if(proxy) candidates.push(proxy(url));
+  const candidates=preferredFetchCandidates(url);
   for(const candidate of candidates){
     try{const r=await fetchT(candidate,5500); if(!r.ok) continue; const d=await r.json(); if(accept(d)) return d;}catch(e){}
   }
@@ -723,8 +727,8 @@ function krInfoMap(data){
   return out;
 }
 async function fetchKrSummary(code){
-  const target=`https://finance.naver.com/item/main.naver?code=${encodeURIComponent(code)}`, proxy=PROXIES()[0];
-  for(const url of [target,proxy?proxy(target):null].filter(Boolean)){
+  const target=`https://finance.naver.com/item/main.naver?code=${encodeURIComponent(code)}`;
+  for(const url of preferredFetchCandidates(target)){
     try{
       const r=await fetchT(url,5500); if(!r.ok) continue;
       const buf=await r.arrayBuffer();
@@ -739,10 +743,9 @@ async function fetchKrSummary(code){
   }
   return '';
 }
-async function fetchKrCompanyData(code){
+async function fetchKrCompanyInfo(code){
   const url=`https://m.stock.naver.com/api/stock/${encodeURIComponent(code)}/integration`;
-  const [data,summary]=await Promise.allSettled([fetchJsonOneFallback(url,d=>d&&Array.isArray(d.totalInfos)),fetchKrSummary(code)]);
-  return {info:data.status==='fulfilled'?data.value:null,summary:summary.status==='fulfilled'?summary.value:''};
+  try{return await fetchJsonOneFallback(url,d=>d&&Array.isArray(d.totalInfos));}catch(e){return null;}
 }
 function renderKrStockDetail(stock,data,news){
   const code=stock.code||stock.symbol, name=stock.name, m=krInfoMap(data?.info), ch=Number(stock.change);
@@ -760,13 +763,16 @@ function renderKrStockDetail(stock,data,news){
 async function loadKrStockDetail(stock){
   const code=stock.code||stock.symbol, key=`KR:${code}`, cached=readKrDetailCache(code)||{};
   renderKrStockDetail(stock,cached.data||null,cached.news||[]);
-  if(cached.savedAt&&Date.now()-cached.savedAt<30*60*1000&&(cached.data||cached.news?.length)) return;
-  const dataJob=fetchKrCompanyData(code), newsJob=fetchGoogleStockNews(stock.name+' 주식');
-  const data=await dataJob;
+  if(cached.complete&&cached.savedAt&&Date.now()-cached.savedAt<30*60*1000) return;
+  const infoJob=fetchKrCompanyInfo(code), summaryJob=fetchKrSummary(code), newsJob=fetchGoogleStockNews(stock.name+' 주식');
+  const info=await infoJob;
+  let data={...(cached.data||{}),info:info||cached.data?.info||null};
+  writeKrDetailCache(code,{data,news:cached.news||[],complete:false});
   if($('stock-modal').dataset.detailKey!==key) return;
   renderKrStockDetail(stock,data,cached.news||[]);
-  const news=await newsJob;
-  writeKrDetailCache(code,{data,news});
+  const [summary,news]=await Promise.all([summaryJob,newsJob]);
+  if(summary) data={...data,summary};
+  writeKrDetailCache(code,{data,news,complete:true});
   if($('stock-modal').dataset.detailKey!==key) return;
   renderKrStockDetail(stock,data,news);
 }
