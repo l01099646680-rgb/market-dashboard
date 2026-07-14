@@ -511,8 +511,7 @@ async function loadUSStocks(){
 
 /* ---------- 국내주식 급등락 (네이버 증권) ---------- */
 async function fetchNaverRank(pageUrl){
-  try{
-      const r=await fetchProxyFast(pageUrl,7000);
+  const parse=async r=>{
       const buf=await r.arrayBuffer();
       const html=new TextDecoder('euc-kr').decode(buf); // 네이버는 EUC-KR 인코딩
       const doc=new DOMParser().parseFromString(html,'text/html');
@@ -529,8 +528,19 @@ async function fetchNaverRank(pageUrl){
         if(!name||isNaN(ch)) continue;
         out.push({name, code, price, ch});
       }
-      if(out.length) return out;
-    }catch(e){}
+      if(!out.length) throw new Error('종목 표를 찾지 못함');
+      return out;
+  };
+  const candidates=[pageUrl,...PROXIES().map(p=>p(pageUrl))];
+  const jobs=candidates.map(async url=>{
+    const r=await fetchT(url,7000);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    return parse(r);
+  });
+  try{
+    if(typeof Promise.any==='function') return await Promise.any(jobs);
+    for(const job of jobs){ try{return await job;}catch(e){} }
+  }catch(e){}
   return null;
 }
 function renderKRRows(arr){
@@ -554,6 +564,15 @@ const US_INTRO_KO={
   META:'페이스북, 인스타그램, 왓츠앱과 광고·인공지능 서비스를 운영하는 소셜 플랫폼 기업입니다.',
   TSLA:'전기자동차, 에너지저장장치와 충전 인프라를 개발·판매하는 기업입니다.'
 };
+const US_META_KO={
+  AAPL:{sector:'기술',industry:'소비자 전자제품',exchange:'나스닥',website:'https://www.apple.com/'},
+  MSFT:{sector:'기술',industry:'소프트웨어·클라우드',exchange:'나스닥',website:'https://www.microsoft.com/'},
+  NVDA:{sector:'기술',industry:'반도체·인공지능',exchange:'나스닥',website:'https://www.nvidia.com/'},
+  GOOGL:{sector:'커뮤니케이션',industry:'인터넷·디지털 광고',exchange:'나스닥',website:'https://abc.xyz/'},
+  AMZN:{sector:'경기소비재',industry:'전자상거래·클라우드',exchange:'나스닥',website:'https://www.aboutamazon.com/'},
+  META:{sector:'커뮤니케이션',industry:'소셜미디어·디지털 광고',exchange:'나스닥',website:'https://about.meta.com/'},
+  TSLA:{sector:'경기소비재',industry:'전기자동차·에너지',exchange:'나스닥',website:'https://www.tesla.com/'}
+};
 const KR_INTRO_KO={
   '005930':'반도체, 스마트폰, 가전제품을 생산하는 대한민국의 대표 전자기업입니다.',
   '000660':'D램과 낸드플래시 등 메모리 반도체를 설계·생산하는 기업입니다.',
@@ -568,6 +587,7 @@ function openStockDetailFromRow(el){
 }
 function openStockDetail(stock){
   const modal=$('stock-modal');
+  modal.dataset.detailKey=`${stock.market}:${stock.code||stock.symbol}`;
   modal.classList.add('open'); modal.setAttribute('aria-hidden','false'); document.body.classList.add('modal-open');
   $('stock-detail').innerHTML=`<div class="detail-kicker">${stock.market==='US'?'미국 주식':'국내 주식'}</div><h2 id="stock-detail-title" class="detail-title">${escHtml(stock.name)}</h2><div class="detail-symbol">${escHtml(stock.symbol||stock.code)}</div><div class="loading" style="margin-top:24px;">회사 정보와 관련 뉴스를 불러오는 중…</div>`;
   if(stock.market==='US') loadUsStockDetail(stock); else loadKrStockDetail(stock);
@@ -585,8 +605,24 @@ function detailNewsHtml(news){
   if(!news.length) return '<div class="loading">표시할 관련 뉴스가 없어요.</div>';
   return news.slice(0,3).map(n=>`<a class="detail-news" href="${escAttr(n.url)}" target="_blank" rel="noopener"><strong>${escHtml(n.title)}</strong><small>${escHtml(n.site||'관련 뉴스')}${n.date?' · '+escHtml(n.date):''}</small></a>`).join('');
 }
+async function fetchGoogleStockNews(query){
+  try{
+    const feed=`https://news.google.com/rss/search?q=${encodeURIComponent(query+' when:14d')}&hl=ko&gl=KR&ceid=KR:ko`;
+    const r=await fetchProxyFast(feed,6500), text=await r.text();
+    const xml=new DOMParser().parseFromString(text,'text/xml');
+    return [...xml.querySelectorAll('item')].slice(0,5).map(it=>({
+      title:(it.querySelector('title')?.textContent||'관련 기사').trim(),
+      url:(it.querySelector('link')?.textContent||'#').trim(),
+      site:(it.querySelector('source')?.textContent||'Google 뉴스').trim(),
+      date:(it.querySelector('pubDate')?.textContent||'').slice(0,16)
+    }));
+  }catch(e){ return []; }
+}
 async function loadUsStockDetail(stock){
   const key=getFmpKey(), sym=String(stock.symbol||'').replace(/\.(KS|KQ)$/,'');
+  const detailKey=`US:${stock.code||stock.symbol}`;
+  const known=US_META_KO[sym]||{};
+  const googleNewsPromise=fetchGoogleStockNews(`${stock.name} ${sym} 주식`);
   let profile=null, news=[];
   if(key){
     try{
@@ -599,32 +635,38 @@ async function loadUsStockDetail(stock){
       news=(Array.isArray(n)?n:[]).map(x=>({title:x.title||x.text||'관련 기사',url:x.url||x.link||'#',site:x.site||x.publisher||'',date:(x.publishedDate||x.date||'').slice(0,10)}));
     }catch(e){}
   }
+  const googleNews=await googleNewsPromise;
+  if(!news.length) news=googleNews;
+  if(!news.length && _allNews.length){
+    const words=[stock.name.toLowerCase(),sym.toLowerCase()];
+    news=_allNews.filter(n=>words.some(w=>String(n.title||'').toLowerCase().includes(w))).slice(0,3)
+      .map(n=>({title:n.title,url:n.link,site:n.src,date:n.date?relTime(n.date):''}));
+  }
   const intro=US_INTRO_KO[sym]||(profile?.description?profile.description.slice(0,700):`${stock.name}의 업종과 최근 이슈를 확인할 수 있는 종목 상세입니다.`);
-  const sector=profile?.sector||'정보 없음', industry=profile?.industry||'정보 없음';
-  const cap=Number(profile?.marketCap); const capText=cap?`$${(cap/1e9).toLocaleString('en-US',{maximumFractionDigits:1})}B`:'정보 없음';
-  $('stock-detail').innerHTML=`<div class="detail-kicker">미국 주식</div><h2 id="stock-detail-title" class="detail-title">${escHtml(profile?.companyName||stock.name)}</h2><div class="detail-symbol">${escHtml(sym)}</div>${detailPriceHtml(stock)}<div class="detail-meta"><div><small>섹터</small><strong>${escHtml(sector)}</strong></div><div><small>산업</small><strong>${escHtml(industry)}</strong></div><div><small>시가총액</small><strong>${escHtml(capText)}</strong></div><div><small>거래소</small><strong>${escHtml(profile?.exchange||profile?.exchangeShortName||'미국')}</strong></div></div><p class="detail-description">${escHtml(intro)}</p><h3 class="detail-section-title">최근 관련 뉴스</h3>${detailNewsHtml(news)}<div class="detail-actions"><a class="detail-action" href="${tvUrl(sym)}" target="_blank" rel="noopener">TradingView 차트 ↗</a><a class="detail-action" href="https://www.google.com/search?q=${encodeURIComponent(stock.name+' 주식 뉴스')}" target="_blank" rel="noopener">관련 뉴스 더 보기 ↗</a>${profile?.website?`<a class="detail-action" href="${escAttr(profile.website)}" target="_blank" rel="noopener">회사 홈페이지 ↗</a>`:''}</div>`;
+  const sector=profile?.sector||known.sector||'미국 상장기업', industry=profile?.industry||known.industry||'기업 정보';
+  const cap=Number(profile?.marketCap); const capText=cap?`$${(cap/1e9).toLocaleString('en-US',{maximumFractionDigits:1})}B`:'실시간 확인 ↗';
+  const capUrl=`https://finance.yahoo.com/quote/${encodeURIComponent(sym)}/`;
+  const website=profile?.website||known.website||'';
+  if($('stock-modal').dataset.detailKey!==detailKey) return;
+  $('stock-detail').innerHTML=`<div class="detail-kicker">미국 주식</div><h2 id="stock-detail-title" class="detail-title">${escHtml(profile?.companyName||stock.name)}</h2><div class="detail-symbol">${escHtml(sym)}</div>${detailPriceHtml(stock)}<div class="detail-meta"><div><small>섹터</small><strong>${escHtml(sector)}</strong></div><div><small>산업</small><strong>${escHtml(industry)}</strong></div><div><small>시가총액</small><strong><a href="${capUrl}" target="_blank" rel="noopener" style="color:inherit">${escHtml(capText)}</a></strong></div><div><small>거래소</small><strong>${escHtml(profile?.exchange||profile?.exchangeShortName||known.exchange||'미국 증시')}</strong></div></div><p class="detail-description">${escHtml(intro)}</p><h3 class="detail-section-title">최근 관련 뉴스</h3>${detailNewsHtml(news)}<div class="detail-actions"><a class="detail-action" href="${tvUrl(sym)}" target="_blank" rel="noopener">TradingView 차트 ↗</a><a class="detail-action" href="https://news.google.com/search?q=${encodeURIComponent(stock.name+' '+sym+' 주식')}&hl=ko&gl=KR&ceid=KR%3Ako" target="_blank" rel="noopener">관련 뉴스 더 보기 ↗</a>${website?`<a class="detail-action" href="${escAttr(website)}" target="_blank" rel="noopener">회사 홈페이지 ↗</a>`:''}</div>`;
 }
 async function loadKrStockDetail(stock){
   const code=stock.code||stock.symbol, name=stock.name;
-  let intro=KR_INTRO_KO[code]||'', news=[];
-  if(!intro){
-    try{
-      const r=await fetchT(`https://ko.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(name)}`,5000);
-      if(r.ok){ const d=await r.json(); if(d.extract) intro=d.extract.slice(0,600); }
-    }catch(e){}
-  }
-  try{
-    const feed=`https://news.google.com/rss/search?q=${encodeURIComponent(name+' 주식')}&hl=ko&gl=KR&ceid=KR:ko`;
-    const r=await fetchProxyFast(feed,6500); const text=await r.text();
-    const xml=new DOMParser().parseFromString(text,'text/xml');
-    news=[...xml.querySelectorAll('item')].slice(0,3).map(it=>({title:(it.querySelector('title')?.textContent||'관련 기사').trim(),url:(it.querySelector('link')?.textContent||'#').trim(),site:'Google 뉴스',date:(it.querySelector('pubDate')?.textContent||'').slice(0,16)}));
-  }catch(e){}
-  if(!intro) intro=`${name}은 국내 증시에 상장된 기업입니다. 아래 네이버 증권의 기업현황과 관련 뉴스를 통해 주요 사업과 최근 이슈를 확인할 수 있습니다.`;
+  const key=`KR:${code}`;
+  const intro=KR_INTRO_KO[code]||`${name}은 국내 증시에 상장된 기업입니다. 네이버 증권의 기업현황과 관련 뉴스를 통해 주요 사업과 최근 이슈를 확인할 수 있습니다.`;
   const naverFinance=`https://finance.naver.com/item/main.naver?code=${encodeURIComponent(code)}`;
-  $('stock-detail').innerHTML=`<div class="detail-kicker">국내 주식</div><h2 id="stock-detail-title" class="detail-title">${escHtml(name)}</h2><div class="detail-symbol">${escHtml(code)}</div>${detailPriceHtml(stock)}<div class="detail-meta"><div><small>종목코드</small><strong>${escHtml(code)}</strong></div><div><small>시장</small><strong>한국 증시</strong></div></div><p class="detail-description">${escHtml(intro)}</p><h3 class="detail-section-title">최근 관련 뉴스</h3>${detailNewsHtml(news)}<div class="detail-actions"><a class="detail-action" href="${tvUrl('KRX:'+code)}" target="_blank" rel="noopener">TradingView 차트 ↗</a><a class="detail-action" href="${naverFinance}" target="_blank" rel="noopener">네이버 기업현황 ↗</a><a class="detail-action" href="https://search.naver.com/search.naver?where=news&query=${encodeURIComponent(name)}" target="_blank" rel="noopener">네이버 관련뉴스 ↗</a></div>`;
+  $('stock-detail').innerHTML=`<div class="detail-kicker">국내 주식</div><h2 id="stock-detail-title" class="detail-title">${escHtml(name)}</h2><div class="detail-symbol">${escHtml(code)}</div>${detailPriceHtml(stock)}<div class="detail-meta"><div><small>종목코드</small><strong>${escHtml(code)}</strong></div><div><small>시장</small><strong>한국 증시</strong></div></div><p class="detail-description">${escHtml(intro)}</p><h3 class="detail-section-title">최근 관련 뉴스</h3><div id="detail-news-list"><div class="loading">뉴스만 따로 불러오는 중…</div></div><div class="detail-actions"><a class="detail-action" href="${tvUrl('KRX:'+code)}" target="_blank" rel="noopener">TradingView 차트 ↗</a><a class="detail-action" href="${naverFinance}" target="_blank" rel="noopener">네이버 기업현황 ↗</a><a class="detail-action" href="https://search.naver.com/search.naver?where=news&query=${encodeURIComponent(name)}" target="_blank" rel="noopener">네이버 관련뉴스 ↗</a></div>`;
+  const news=await fetchGoogleStockNews(name+' 주식');
+  if($('stock-modal').dataset.detailKey!==key) return;
+  const target=$('detail-news-list');
+  if(target) target.innerHTML=news.length?detailNewsHtml(news):`<a class="detail-news" href="https://search.naver.com/search.naver?where=news&query=${encodeURIComponent(name)}" target="_blank" rel="noopener"><strong>네이버에서 ${escHtml(name)} 최신 뉴스 보기 ↗</strong><small>뉴스 자동 조회가 지연되고 있습니다.</small></a>`;
 }
-let _krCache={gain:null, lose:null};
+function readKrCache(){ try{return JSON.parse(localStorage.getItem('krRankCache')||'null')||{gain:null,lose:null};}catch(e){return {gain:null,lose:null};} }
+let _krCache=readKrCache();
+function krRankError(url){ return `<div class="err">네이버 순위 연결이 지연되고 있어요.<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:9px"><button class="refresh" onclick="loadKRStocks()">다시 시도</button><a class="detail-action" href="${url}" target="_blank" rel="noopener">네이버에서 보기 ↗</a></div></div>`; }
 async function loadKRStocks(){
+  if(_krCache.gain) $('kr-gainers').innerHTML=renderKRRows(_krCache.gain.slice(0,10));
+  if(_krCache.lose) $('kr-losers').innerHTML=renderKRRows(_krCache.lose.slice(0,10));
   try{
     const [rise,fall]=await Promise.all([
       fetchNaverRank('https://finance.naver.com/sise/sise_rise.naver'),
@@ -632,11 +674,12 @@ async function loadKRStocks(){
     ]);
     if(rise&&rise.length) _krCache.gain=rise;
     if(fall&&fall.length) _krCache.lose=fall;
-    $('kr-gainers').innerHTML = _krCache.gain? renderKRRows(_krCache.gain.slice(0,10)) : '<div class="loading">불러오는 중… (자동 재시도)</div>';
-    $('kr-losers').innerHTML  = _krCache.lose? renderKRRows(_krCache.lose.slice(0,10)) : '<div class="loading">불러오는 중… (자동 재시도)</div>';
+    if(rise||fall){ try{localStorage.setItem('krRankCache',JSON.stringify(_krCache));}catch(e){} }
+    $('kr-gainers').innerHTML = _krCache.gain? renderKRRows(_krCache.gain.slice(0,10)) : krRankError('https://finance.naver.com/sise/sise_rise.naver');
+    $('kr-losers').innerHTML  = _krCache.lose? renderKRRows(_krCache.lose.slice(0,10)) : krRankError('https://finance.naver.com/sise/sise_fall.naver');
   }catch(e){
-    if(!_krCache.gain) $('kr-gainers').innerHTML='<div class="loading">불러오는 중… (자동 재시도)</div>';
-    if(!_krCache.lose) $('kr-losers').innerHTML='<div class="loading">불러오는 중… (자동 재시도)</div>';
+    if(!_krCache.gain) $('kr-gainers').innerHTML=krRankError('https://finance.naver.com/sise/sise_rise.naver');
+    if(!_krCache.lose) $('kr-losers').innerHTML=krRankError('https://finance.naver.com/sise/sise_fall.naver');
   }
 }
 
