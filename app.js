@@ -53,7 +53,7 @@ function writeSaved(name,value){
   }catch(e){}
 }
 async function fetchJsonFast(url, accept=d=>d!=null){
-  const candidates=[url,...PROXIES().map(p=>p(url))];
+  const candidates=[url,`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`];
   const jobs=candidates.map(async candidate=>{
     const r=await fetchT(candidate,6500);
     if(!r.ok) throw new Error('HTTP '+r.status);
@@ -80,7 +80,7 @@ function getProxyBase(){ return readSaved('proxyBase').replace(/\/+$/,''); }
 function PROXIES(){
   const list=[];
   const my=getProxyBase();
-  if(my) list.push(u=>`${my}/?url=${encodeURIComponent(u)}`);
+  if(my) return [u=>`${my}/?url=${encodeURIComponent(u)}`];
   list.push(u=>`https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`);
   list.push(u=>`https://corsproxy.io/?url=${encodeURIComponent(u)}`);
   list.push(u=>`https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(u)}`);
@@ -88,7 +88,7 @@ function PROXIES(){
 }
 function preferredFetchCandidates(url){
   const my=getProxyBase();
-  if(my) return [`${my}/?url=${encodeURIComponent(url)}`,url,...PROXIES().slice(1).map(p=>p(url))];
+  if(my) return [`${my}/?url=${encodeURIComponent(url)}`,`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`];
   return [url,...PROXIES().map(p=>p(url))];
 }
 
@@ -782,9 +782,11 @@ async function loadKrStockDetail(stock){
   renderKrStockDetail(stock,data,news);
 }
 function readKrCache(){ try{return JSON.parse(localStorage.getItem('krRankCache')||'null')||{gain:null,lose:null};}catch(e){return {gain:null,lose:null};} }
-let _krCache=readKrCache();
+let _krCache=readKrCache(), _krRankLoading=false;
 function krRankError(url){ return `<div class="err">네이버 순위 연결이 지연되고 있어요.<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:9px"><button class="refresh" onclick="loadKRStocks()">다시 시도</button><a class="detail-action" href="${url}" target="_blank" rel="noopener">네이버에서 보기 ↗</a></div></div>`; }
 async function loadKRStocks(){
+  if(_krRankLoading) return;
+  _krRankLoading=true;
   if(_krCache.gain) $('kr-gainers').innerHTML=renderKRRows(_krCache.gain.slice(0,10));
   if(_krCache.lose) $('kr-losers').innerHTML=renderKRRows(_krCache.lose.slice(0,10));
   try{
@@ -800,6 +802,8 @@ async function loadKRStocks(){
   }catch(e){
     if(!_krCache.gain) $('kr-gainers').innerHTML=krRankError('https://finance.naver.com/sise/sise_rise.naver');
     if(!_krCache.lose) $('kr-losers').innerHTML=krRankError('https://finance.naver.com/sise/sise_fall.naver');
+  }finally{
+    _krRankLoading=false;
   }
 }
 
@@ -822,24 +826,35 @@ const EV_KO=[
   ['Flash Services PMI','서비스 PMI(속보)'],
 ];
 function evKo(name){ if(!name) return ''; for(const [en,ko] of EV_KO){ if(name.includes(en)) return ko; } return name; }
-let _calCache=null;
+function readCalendarCache(){
+  try{const d=JSON.parse(localStorage.getItem('calendarCache')||'null'); return d&&Date.now()-d.savedAt<48*36e5?d.items:null;}catch(e){return null;}
+}
+let _calCache=readCalendarCache(), _calendarLoading=false;
+async function fetchCalendarSource(src){
+  const urls=[src,`https://api.allorigins.win/raw?url=${encodeURIComponent(src)}`];
+  const jobs=urls.map(async url=>{
+    const r=await fetchT(url,6500); if(!r.ok) throw new Error('HTTP '+r.status);
+    const txt=await r.text(); if(txt.trim().charAt(0)!=='[') throw new Error('잘못된 캘린더 응답');
+    const d=JSON.parse(txt); if(!Array.isArray(d)||!d.length) throw new Error('빈 캘린더');
+    return d;
+  });
+  return Promise.any(jobs);
+}
 async function loadCalendar(){
+  if(_calendarLoading) return;
+  _calendarLoading=true;
+  if(_calCache) renderCalendar(_calCache);
   const srcs=[
     'https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json',
     'https://nfs.faireconomy.media/ff_calendar_thisweek.json',
   ];
   let data=null;
   for(const src of srcs){
-      try{
-        const r=await fetchProxyFast(src,7000);
-        const txt=await r.text();
-        if(txt.trim().charAt(0)!=='[') continue; // 차단/HTML 응답 거르기
-        const d=JSON.parse(txt);
-        if(Array.isArray(d) && d.length){ data=d; break; }
-      }catch(e){}
+      try{data=await fetchCalendarSource(src); if(data) break;}catch(e){}
   }
-  if(data) _calCache=data;
-  if(!_calCache){ $('calendar').innerHTML='<div class="loading">불러오는 중… (자동 재시도) — 계속 안 뜨면 알려줘요</div>'; return; }
+  if(data){ _calCache=data; try{localStorage.setItem('calendarCache',JSON.stringify({savedAt:Date.now(),items:data}));}catch(e){} }
+  _calendarLoading=false;
+  if(!_calCache){ $('calendar').innerHTML='<div class="err">캘린더 연결이 잠시 지연되고 있어요. 데이터 새로고침을 눌러 다시 시도하세요.</div>'; return; }
   renderCalendar(_calCache);
 }
 function renderCalendar(src){
@@ -892,7 +907,14 @@ async function loadAll(){
   const p=n=>String(n).padStart(2,'0');
   $('updated').textContent=`갱신: ${p(now.getHours())}:${p(now.getMinutes())}:${p(now.getSeconds())}`;
 }
-function manualRefresh(){ loadAll(); loadMetrics(); loadKRStocks(); loadNews(); loadUSStocks(); loadCalendar(); }
+function manualRefresh(){
+  loadAll();
+  setTimeout(loadMetrics,300);
+  setTimeout(loadKRStocks,700);
+  setTimeout(loadCalendar,1100);
+  setTimeout(loadNews,1500);
+  setTimeout(loadUSStocks,1900);
+}
 
 /* ---------- 내 프록시 설정 ---------- */
 function saveProxy(){
@@ -914,21 +936,14 @@ updateProxyStatus();
 // 첫 로드 (프록시 요청을 시간차로 분산 → 동시 과부하 방지)
 loadAll();                       // 코인·공포탐욕
 loadUSStocks();                  // 미국주식 (FMP 직접)
-setTimeout(loadCalendar, 800);   // 경제 캘린더
-setTimeout(loadCalendar, 20000); // 캘린더 재시도
-setTimeout(loadCalendar, 45000); // 캘린더 재시도
 setTimeout(loadMetrics,   150);  // 지표 (묶음 1요청)
-setTimeout(loadNews,      700);  // 뉴스
-setTimeout(loadKRStocks, 1200);  // 국내주식
-// 워밍업 — 빈칸 빨리 채우기
-setTimeout(loadMetrics,  25000);
-setTimeout(loadNews,     32000);
-setTimeout(loadKRStocks, 38000);
-
+setTimeout(loadKRStocks,  900);  // 국내주식
+setTimeout(loadCalendar, 1800);  // 경제 캘린더
+setTimeout(loadNews,     3200);  // 뉴스
 // 갱신 주기 (프록시 부담 분산)
-setInterval(loadAll,     60000);   // 코인·공포탐욕: 1분
+setInterval(loadAll,     120000);  // 코인·공포탐욕: 2분
 setInterval(loadMetrics, 120000);  // 지수·환율·원자재·크립토지표: 2분
-setInterval(loadKRStocks,90000);   // 국내주식: 1.5분
+setInterval(loadKRStocks,180000);  // 국내주식: 3분
 setInterval(loadNews,    180000);  // 뉴스: 3분
 setInterval(loadUSStocks,600000);  // 미국주식: 10분 (무료 한도 절약)
 setInterval(loadCalendar,600000);  // 경제 캘린더: 10분 (발표값 갱신)
