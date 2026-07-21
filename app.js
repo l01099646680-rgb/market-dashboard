@@ -53,7 +53,7 @@ function writeSaved(name,value){
   }catch(e){}
 }
 async function fetchJsonFast(url, accept=d=>d!=null){
-  const candidates=[url,`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`];
+  const candidates=[url,...PROXIES().map(p=>p(url))];
   const jobs=candidates.map(async candidate=>{
     const r=await fetchT(candidate,6500);
     if(!r.ok) throw new Error('HTTP '+r.status);
@@ -80,16 +80,11 @@ function getProxyBase(){ return readSaved('proxyBase').replace(/\/+$/,''); }
 function PROXIES(){
   const list=[];
   const my=getProxyBase();
-  if(my) return [u=>`${my}/?url=${encodeURIComponent(u)}`];
+  if(my) list.push(u=>`${my}/?url=${encodeURIComponent(u)}`);
   list.push(u=>`https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`);
   list.push(u=>`https://corsproxy.io/?url=${encodeURIComponent(u)}`);
   list.push(u=>`https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(u)}`);
   return list;
-}
-function preferredFetchCandidates(url){
-  const my=getProxyBase();
-  if(my) return [`${my}/?url=${encodeURIComponent(url)}`,`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`];
-  return [url,...PROXIES().map(p=>p(url))];
 }
 
 /* ---------- 코인 가격 ---------- */
@@ -556,7 +551,7 @@ async function fetchNaverRank(pageUrl){
       if(!out.length) throw new Error('종목 표를 찾지 못함');
       return out;
   };
-  const candidates=preferredFetchCandidates(pageUrl);
+  const candidates=[pageUrl,...PROXIES().map(p=>p(pageUrl))];
   const jobs=candidates.map(async url=>{
     const r=await fetchT(url,7000);
     if(!r.ok) throw new Error('HTTP '+r.status);
@@ -647,7 +642,8 @@ function readUsDetailCache(sym){ try{return JSON.parse(localStorage.getItem('usD
 function writeUsDetailCache(sym,data){ try{localStorage.setItem('usDetail:'+sym,JSON.stringify({...data,savedAt:Date.now()}));}catch(e){} }
 function mapFmpNews(items){ return (Array.isArray(items)?items:[]).map(x=>({title:x.title||x.text||'관련 기사',url:x.url||x.link||'#',site:x.site||x.publisher||'',date:(x.publishedDate||x.date||'').slice(0,10)})); }
 async function fetchJsonOneFallback(url,accept){
-  const candidates=preferredFetchCandidates(url);
+  const proxy=PROXIES()[0], candidates=[url];
+  if(proxy) candidates.push(proxy(url));
   for(const candidate of candidates){
     try{const r=await fetchT(candidate,5500); if(!r.ok) continue; const d=await r.json(); if(accept(d)) return d;}catch(e){}
   }
@@ -715,22 +711,22 @@ const KR_DETAIL_KO={
 };
 function readKrDetailCache(code){
   try{
-    const d=JSON.parse(localStorage.getItem('krDetail:'+code)||'null');
-    if(d?.data?.summary&&/[�]/.test(d.data.summary)){ localStorage.removeItem('krDetail:'+code); return null; }
-    if(d?.complete&&!d?.data?.info&&!d?.data?.summary&&!d?.news?.length){ localStorage.removeItem('krDetail:'+code); return null; }
+    const d=JSON.parse(localStorage.getItem('krDetailStable:'+code)||'null');
+    if(d?.data?.summary&&/[�]/.test(d.data.summary)){ localStorage.removeItem('krDetailStable:'+code); return null; }
     return d;
   }catch(e){return null;}
 }
-function writeKrDetailCache(code,data){ try{localStorage.setItem('krDetail:'+code,JSON.stringify({...data,savedAt:Date.now()}));}catch(e){} }
+function writeKrDetailCache(code,data){ try{localStorage.setItem('krDetailStable:'+code,JSON.stringify({...data,savedAt:Date.now()}));}catch(e){} }
 function krInfoMap(data){
   const out={};
   for(const x of (data?.totalInfos||[])){ if(x.code) out[x.code]=x.value; if(x.key) out[x.key]=x.value; }
   return out;
 }
 async function fetchKrSummary(code){
-  const target=`https://finance.naver.com/item/main.naver?code=${encodeURIComponent(code)}`;
-  const jobs=preferredFetchCandidates(target).map(async url=>{
-      const r=await fetchT(url,5500); if(!r.ok) throw new Error('HTTP '+r.status);
+  const target=`https://finance.naver.com/item/main.naver?code=${encodeURIComponent(code)}`, proxy=PROXIES()[0];
+  for(const url of [target,proxy?proxy(target):null].filter(Boolean)){
+    try{
+      const r=await fetchT(url,5500); if(!r.ok) continue;
       const buf=await r.arrayBuffer();
       let html='';
       try{ html=new TextDecoder('utf-8',{fatal:true}).decode(buf); }
@@ -738,19 +734,15 @@ async function fetchKrSummary(code){
       const doc=new DOMParser().parseFromString(html,'text/html');
       const el=doc.querySelector('.summary_info,#summary_info,.section.cop_analysis .sub_section');
       const text=(el?.textContent||'').replace(/\s+/g,' ').trim();
-      if(text.length<=35) throw new Error('기업개요 없음');
-      return text.slice(0,750);
-  });
-  try{return await Promise.any(jobs);}catch(e){return '';}
+      if(text.length>35) return text.slice(0,750);
+    }catch(e){}
+  }
+  return '';
 }
-async function fetchKrCompanyInfo(code){
+async function fetchKrCompanyData(code){
   const url=`https://m.stock.naver.com/api/stock/${encodeURIComponent(code)}/integration`;
-  const jobs=preferredFetchCandidates(url).map(async candidate=>{
-    const r=await fetchT(candidate,5500); if(!r.ok) throw new Error('HTTP '+r.status);
-    const d=await r.json(); if(!d||!Array.isArray(d.totalInfos)||!d.totalInfos.length) throw new Error('상세정보 없음');
-    return d;
-  });
-  try{return await Promise.any(jobs);}catch(e){return null;}
+  const [data,summary]=await Promise.allSettled([fetchJsonOneFallback(url,d=>d&&Array.isArray(d.totalInfos)),fetchKrSummary(code)]);
+  return {info:data.status==='fulfilled'?data.value:null,summary:summary.status==='fulfilled'?summary.value:''};
 }
 function renderKrStockDetail(stock,data,news){
   const code=stock.code||stock.symbol, name=stock.name, m=krInfoMap(data?.info), ch=Number(stock.change);
@@ -768,25 +760,20 @@ function renderKrStockDetail(stock,data,news){
 async function loadKrStockDetail(stock){
   const code=stock.code||stock.symbol, key=`KR:${code}`, cached=readKrDetailCache(code)||{};
   renderKrStockDetail(stock,cached.data||null,cached.news||[]);
-  if(cached.complete&&cached.savedAt&&Date.now()-cached.savedAt<30*60*1000) return;
-  const infoJob=fetchKrCompanyInfo(code), summaryJob=fetchKrSummary(code), newsJob=fetchGoogleStockNews(stock.name+' 주식');
-  const info=await infoJob;
-  let data={...(cached.data||{}),info:info||cached.data?.info||null};
-  writeKrDetailCache(code,{data,news:cached.news||[],complete:false});
+  if(cached.savedAt&&Date.now()-cached.savedAt<30*60*1000&&(cached.data||cached.news?.length)) return;
+  const dataJob=fetchKrCompanyData(code), newsJob=fetchGoogleStockNews(stock.name+' 주식');
+  const data=await dataJob;
   if($('stock-modal').dataset.detailKey!==key) return;
   renderKrStockDetail(stock,data,cached.news||[]);
-  const [summary,news]=await Promise.all([summaryJob,newsJob]);
-  if(summary) data={...data,summary};
-  writeKrDetailCache(code,{data,news,complete:Boolean(data.info||data.summary||news.length)});
+  const news=await newsJob;
+  writeKrDetailCache(code,{data,news});
   if($('stock-modal').dataset.detailKey!==key) return;
   renderKrStockDetail(stock,data,news);
 }
 function readKrCache(){ try{return JSON.parse(localStorage.getItem('krRankCache')||'null')||{gain:null,lose:null};}catch(e){return {gain:null,lose:null};} }
-let _krCache=readKrCache(), _krRankLoading=false;
+let _krCache=readKrCache();
 function krRankError(url){ return `<div class="err">네이버 순위 연결이 지연되고 있어요.<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:9px"><button class="refresh" onclick="loadKRStocks()">다시 시도</button><a class="detail-action" href="${url}" target="_blank" rel="noopener">네이버에서 보기 ↗</a></div></div>`; }
 async function loadKRStocks(){
-  if(_krRankLoading) return;
-  _krRankLoading=true;
   if(_krCache.gain) $('kr-gainers').innerHTML=renderKRRows(_krCache.gain.slice(0,10));
   if(_krCache.lose) $('kr-losers').innerHTML=renderKRRows(_krCache.lose.slice(0,10));
   try{
@@ -802,8 +789,6 @@ async function loadKRStocks(){
   }catch(e){
     if(!_krCache.gain) $('kr-gainers').innerHTML=krRankError('https://finance.naver.com/sise/sise_rise.naver');
     if(!_krCache.lose) $('kr-losers').innerHTML=krRankError('https://finance.naver.com/sise/sise_fall.naver');
-  }finally{
-    _krRankLoading=false;
   }
 }
 
@@ -826,35 +811,24 @@ const EV_KO=[
   ['Flash Services PMI','서비스 PMI(속보)'],
 ];
 function evKo(name){ if(!name) return ''; for(const [en,ko] of EV_KO){ if(name.includes(en)) return ko; } return name; }
-function readCalendarCache(){
-  try{const d=JSON.parse(localStorage.getItem('calendarCache')||'null'); return d&&Date.now()-d.savedAt<48*36e5?d.items:null;}catch(e){return null;}
-}
-let _calCache=readCalendarCache(), _calendarLoading=false;
-async function fetchCalendarSource(src){
-  const urls=[src,`https://api.allorigins.win/raw?url=${encodeURIComponent(src)}`];
-  const jobs=urls.map(async url=>{
-    const r=await fetchT(url,6500); if(!r.ok) throw new Error('HTTP '+r.status);
-    const txt=await r.text(); if(txt.trim().charAt(0)!=='[') throw new Error('잘못된 캘린더 응답');
-    const d=JSON.parse(txt); if(!Array.isArray(d)||!d.length) throw new Error('빈 캘린더');
-    return d;
-  });
-  return Promise.any(jobs);
-}
+let _calCache=null;
 async function loadCalendar(){
-  if(_calendarLoading) return;
-  _calendarLoading=true;
-  if(_calCache) renderCalendar(_calCache);
   const srcs=[
     'https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json',
     'https://nfs.faireconomy.media/ff_calendar_thisweek.json',
   ];
   let data=null;
   for(const src of srcs){
-      try{data=await fetchCalendarSource(src); if(data) break;}catch(e){}
+      try{
+        const r=await fetchProxyFast(src,7000);
+        const txt=await r.text();
+        if(txt.trim().charAt(0)!=='[') continue; // 차단/HTML 응답 거르기
+        const d=JSON.parse(txt);
+        if(Array.isArray(d) && d.length){ data=d; break; }
+      }catch(e){}
   }
-  if(data){ _calCache=data; try{localStorage.setItem('calendarCache',JSON.stringify({savedAt:Date.now(),items:data}));}catch(e){} }
-  _calendarLoading=false;
-  if(!_calCache){ $('calendar').innerHTML='<div class="err">캘린더 연결이 잠시 지연되고 있어요. 데이터 새로고침을 눌러 다시 시도하세요.</div>'; return; }
+  if(data) _calCache=data;
+  if(!_calCache){ $('calendar').innerHTML='<div class="loading">불러오는 중… (자동 재시도) — 계속 안 뜨면 알려줘요</div>'; return; }
   renderCalendar(_calCache);
 }
 function renderCalendar(src){
@@ -907,14 +881,7 @@ async function loadAll(){
   const p=n=>String(n).padStart(2,'0');
   $('updated').textContent=`갱신: ${p(now.getHours())}:${p(now.getMinutes())}:${p(now.getSeconds())}`;
 }
-function manualRefresh(){
-  loadAll();
-  setTimeout(loadMetrics,300);
-  setTimeout(loadKRStocks,700);
-  setTimeout(loadCalendar,1100);
-  setTimeout(loadNews,1500);
-  setTimeout(loadUSStocks,1900);
-}
+function manualRefresh(){ loadAll(); loadMetrics(); loadKRStocks(); loadNews(); loadUSStocks(); loadCalendar(); }
 
 /* ---------- 내 프록시 설정 ---------- */
 function saveProxy(){
@@ -936,14 +903,21 @@ updateProxyStatus();
 // 첫 로드 (프록시 요청을 시간차로 분산 → 동시 과부하 방지)
 loadAll();                       // 코인·공포탐욕
 loadUSStocks();                  // 미국주식 (FMP 직접)
+setTimeout(loadCalendar, 800);   // 경제 캘린더
+setTimeout(loadCalendar, 20000); // 캘린더 재시도
+setTimeout(loadCalendar, 45000); // 캘린더 재시도
 setTimeout(loadMetrics,   150);  // 지표 (묶음 1요청)
-setTimeout(loadKRStocks,  900);  // 국내주식
-setTimeout(loadCalendar, 1800);  // 경제 캘린더
-setTimeout(loadNews,     3200);  // 뉴스
+setTimeout(loadNews,      700);  // 뉴스
+setTimeout(loadKRStocks, 1200);  // 국내주식
+// 워밍업 — 빈칸 빨리 채우기
+setTimeout(loadMetrics,  25000);
+setTimeout(loadNews,     32000);
+setTimeout(loadKRStocks, 38000);
+
 // 갱신 주기 (프록시 부담 분산)
-setInterval(loadAll,     120000);  // 코인·공포탐욕: 2분
+setInterval(loadAll,     60000);   // 코인·공포탐욕: 1분
 setInterval(loadMetrics, 120000);  // 지수·환율·원자재·크립토지표: 2분
-setInterval(loadKRStocks,180000);  // 국내주식: 3분
+setInterval(loadKRStocks,90000);   // 국내주식: 1.5분
 setInterval(loadNews,    180000);  // 뉴스: 3분
 setInterval(loadUSStocks,600000);  // 미국주식: 10분 (무료 한도 절약)
 setInterval(loadCalendar,600000);  // 경제 캘린더: 10분 (발표값 갱신)
