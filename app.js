@@ -744,31 +744,16 @@ async function fetchKrCompanyData(code){
   const [data,summary]=await Promise.allSettled([fetchJsonOneFallback(url,d=>d&&Array.isArray(d.totalInfos)),fetchKrSummary(code)]);
   return {info:data.status==='fulfilled'?data.value:null,summary:summary.status==='fulfilled'?summary.value:''};
 }
-function renderKrStockDetail(stock,data,news){
-  const code=stock.code||stock.symbol, name=stock.name, m=krInfoMap(data?.info), ch=Number(stock.change);
-  const intro=KR_DETAIL_KO[code]||data?.summary||KR_INTRO_KO[code]||`${name}은(는) 국내 증시에 상장된 기업입니다. 주요 사업, 최근 실적과 자금조달 여부는 기업현황과 공시를 함께 확인하는 것이 좋습니다.`;
-  const market=data?.info?.stockExchangeType?.nameKor||data?.info?.stockExchangeType?.name||data?.info?.stockEndType?.name||data?.info?.exchangeName||'한국 증시';
-  const pick=(...keys)=>keys.map(k=>m[k]).find(v=>v&&v!=='N/A'&&v!=='-')||'확인 필요';
-  const cap=pick('marketValue','시가총액'), per=pick('per','PER'), pbr=pick('pbr','PBR'), volume=pick('accumulatedTradingVolume','거래량');
-  const high=pick('highPriceOf52Weeks','52주최고'), low=pick('lowPriceOf52Weeks','52주최저'), dividend=pick('dividendYieldRatio','배당수익률');
+function renderKrStockDetail(stock){
+  const code=stock.code||stock.symbol, name=stock.name, ch=Number(stock.change);
+  const intro=KR_DETAIL_KO[code]||KR_INTRO_KO[code]||`${name}의 상세 재무지표와 사업 내용은 아래 네이버 기업현황 및 DART 공시에서 바로 확인할 수 있습니다.`;
   const naverFinance=`https://finance.naver.com/item/main.naver?code=${encodeURIComponent(code)}`, dart=`https://dart.fss.or.kr/dsab007/main.do?option=corp&keyword=${encodeURIComponent(name)}`;
   const newsUrl=`https://search.naver.com/search.naver?where=news&query=${encodeURIComponent(name)}`;
-  const newsHtml=news?.length?detailNewsHtml(news):`<a class="detail-news" href="${newsUrl}" target="_blank" rel="noopener"><strong>네이버에서 ${escHtml(name)} 최신 뉴스 바로 보기 ↗</strong><small>자동 기사 목록이 없어도 검색 결과는 바로 열립니다.</small></a>`;
   const risk=Math.abs(ch)>=20?`<div class="detail-risk"><b>급등락 주의</b> 하루 변동률이 ${escHtml(chgStr(ch))}입니다. 투자경고·거래정지·유상증자·최대주주 변경 여부를 공시에서 확인하세요.</div>`:'';
-  $('stock-detail').innerHTML=`<div class="detail-kicker">국내 주식</div><h2 id="stock-detail-title" class="detail-title">${escHtml(name)}</h2><div class="detail-symbol">${escHtml(code)}</div>${detailPriceHtml(stock)}${risk}<div class="detail-meta"><div><small>시장</small><strong>${escHtml(market)}</strong></div><div><small>시가총액</small><strong>${escHtml(cap)}</strong></div><div><small>PER / PBR</small><strong>${escHtml(per)} / ${escHtml(pbr)}</strong></div><div><small>52주 최저 / 최고</small><strong>${escHtml(low)} / ${escHtml(high)}</strong></div><div><small>거래량</small><strong>${escHtml(volume)}</strong></div><div><small>배당수익률</small><strong>${escHtml(dividend)}</strong></div></div><p class="detail-description">${escHtml(intro)}</p><h3 class="detail-section-title">최근 관련 뉴스</h3>${newsHtml}<div class="detail-actions"><a class="detail-action" href="${tvUrl('KRX:'+code)}" target="_blank" rel="noopener">TradingView 차트 ↗</a><a class="detail-action" href="${naverFinance}" target="_blank" rel="noopener">네이버 기업현황 ↗</a><a class="detail-action" href="${dart}" target="_blank" rel="noopener">DART 공시 ↗</a><a class="detail-action" href="${newsUrl}" target="_blank" rel="noopener">최신 뉴스 ↗</a></div>`;
+  $('stock-detail').innerHTML=`<div class="detail-kicker">국내 주식</div><h2 id="stock-detail-title" class="detail-title">${escHtml(name)}</h2><div class="detail-symbol">종목코드 ${escHtml(code)}</div>${detailPriceHtml(stock)}${risk}<p class="detail-description">${escHtml(intro)}</p><div class="detail-actions"><a class="detail-action" href="${tvUrl('KRX:'+code)}" target="_blank" rel="noopener">TradingView 차트 ↗</a><a class="detail-action" href="${naverFinance}" target="_blank" rel="noopener">네이버 기업현황 ↗</a><a class="detail-action" href="${dart}" target="_blank" rel="noopener">DART 공시 ↗</a><a class="detail-action" href="${newsUrl}" target="_blank" rel="noopener">최신 뉴스 ↗</a></div>`;
 }
 async function loadKrStockDetail(stock){
-  const code=stock.code||stock.symbol, key=`KR:${code}`, cached=readKrDetailCache(code)||{};
-  renderKrStockDetail(stock,cached.data||null,cached.news||[]);
-  if(cached.savedAt&&Date.now()-cached.savedAt<30*60*1000&&(cached.data||cached.news?.length)) return;
-  const dataJob=fetchKrCompanyData(code), newsJob=fetchGoogleStockNews(stock.name+' 주식');
-  const data=await dataJob;
-  if($('stock-modal').dataset.detailKey!==key) return;
-  renderKrStockDetail(stock,data,cached.news||[]);
-  const news=await newsJob;
-  writeKrDetailCache(code,{data,news});
-  if($('stock-modal').dataset.detailKey!==key) return;
-  renderKrStockDetail(stock,data,news);
+  renderKrStockDetail(stock);
 }
 function readKrCache(){ try{return JSON.parse(localStorage.getItem('krRankCache')||'null')||{gain:null,lose:null};}catch(e){return {gain:null,lose:null};} }
 let _krCache=readKrCache();
