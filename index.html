@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>마켓 데스크</title>
+<link rel="icon" href="data:image/png;base64,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">
+<link rel="apple-touch-icon" href="data:image/png;base64,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">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="마켓 데스크">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span class="dot"></span>
+    <h1>마켓<b>데스크</b></h1>
+  </div>
+  <div class="clock">
+    <div>
+      <div class="time" id="clock">--:--:--</div>
+      <div class="updated" id="updated">불러오는 중…</div>
+    </div>
+    <div class="date" id="date">—</div>
+  </div>
+</header>
+
+<div class="ticker"><div class="ticker-track" id="ticker-track"></div></div>
+
+<div class="toolbar">
+  <div class="toolbar-copy"><strong>오늘의 시장을 한눈에</strong><span>주요 자산, 변동성, 일정과 뉴스를 실시간으로 확인하세요.</span></div>
+  <div class="toolbar-actions">
+    <button class="refresh" onclick="manualRefresh()">↻ 데이터 새로고침</button>
+    <details class="settings">
+      <summary class="refresh">⚙ 설정</summary>
+      <div class="settings-pop">
+        <label for="proxyInput">개인 프록시 주소</label>
+        <div class="settings-row">
+          <input id="proxyInput" placeholder="https://xxx.workers.dev">
+          <button class="refresh" onclick="saveProxy()">저장</button>
+        </div>
+        <span id="proxy-status"></span>
+      </div>
+    </details>
+  </div>
+</div>
+
+<div class="section-head"><div><h2>시장 요약</h2><p>글로벌 자산의 현재 흐름과 변동률</p></div><p>항목을 누르면 TradingView 차트로 이동합니다</p></div>
+<div class="panel market-panel">
+  <h2>마켓 지표 · Markets</h2>
+  <div class="metrics">
+    <div class="mgroup"><div class="mg-title">지수</div><div id="grp-index" class="mg-rows"><div class="loading">불러오는 중…</div></div></div>
+    <div class="mgroup"><div class="mg-title">환율 · 금리</div><div id="grp-fx" class="mg-rows"><div class="loading">불러오는 중…</div></div></div>
+    <div class="mgroup"><div class="mg-title">원자재</div><div id="grp-comm" class="mg-rows"><div class="loading">불러오는 중…</div></div></div>
+    <div class="mgroup"><div class="mg-title">크립토</div><div id="grp-crypto" class="mg-rows"><div class="loading">불러오는 중…</div></div></div>
+  </div>
+</div>
+
+<div class="section-head"><div><h2>주요 자산</h2><p>관심도가 높은 코인과 대표 종목</p></div></div>
+<div class="grid overview-grid">
+  <!-- 주요 코인 -->
+  <div class="panel">
+    <h2>주요 코인 · Crypto</h2>
+    <div id="crypto"><div class="loading">불러오는 중…</div></div>
+  </div>
+
+  <!-- 공포탐욕지수 -->
+  <div class="panel">
+    <h2>공포탐욕지수 · Fear &amp; Greed</h2>
+    <div id="fng" class="fng"><div class="loading">불러오는 중…</div></div>
+  </div>
+
+  <!-- 미국 대장주 -->
+  <div class="panel">
+    <h2>미국 대장주 · US Leaders</h2>
+    <div id="us-leaders"><div class="loading">불러오는 중…</div></div>
+  </div>
+
+  <!-- 국내 대장주 -->
+  <div class="panel">
+    <h2>국내 대장주 · KR Leaders</h2>
+    <div id="kr-leaders"><div class="loading">불러오는 중…</div></div>
+  </div>
+</div>
+
+<div class="section-head"><div><h2>시장 급등락</h2><p>시장별 상승·하락 상위 종목</p></div><p>가격 변동이 큰 자산은 리스크를 확인하세요</p></div>
+<div class="grid movers-grid">
+  <div class="mover-group">
+  <div class="mover-group-title">디지털 자산</div>
+  <div class="panel">
+    <h2 style="color:var(--up);">코인 급등 TOP 10</h2>
+    <div id="gainers"><div class="loading">불러오는 중…</div></div>
+  </div>
+  <div class="panel">
+    <h2 style="color:var(--down);">코인 급락 TOP 10</h2>
+    <div id="losers"><div class="loading">불러오는 중…</div></div>
+  </div>
+  </div>
+  <div class="mover-group">
+  <div class="mover-group-title">미국 주식</div>
+  <div class="panel">
+    <h2 style="color:var(--up);">미국주식 급등 TOP 10 <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;">— 전체</span></h2>
+    <div id="us-gainers"><div class="loading">불러오는 중…</div></div>
+  </div>
+  <div class="panel">
+    <h2 style="color:var(--down);">미국주식 급락 TOP 10 <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;">— 전체</span></h2>
+    <div id="us-losers"><div class="loading">불러오는 중…</div></div>
+  </div>
+  </div>
+  <div class="mover-group">
+  <div class="mover-group-title">국내 주식</div>
+  <div class="panel">
+    <h2 style="color:var(--up);">국내주식 급등 TOP 10 <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;">— 네이버</span></h2>
+    <div id="kr-gainers"><div class="loading">불러오는 중…</div></div>
+  </div>
+  <div class="panel">
+    <h2 style="color:var(--down);">국내주식 급락 TOP 10 <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;">— 네이버</span></h2>
+    <div id="kr-losers"><div class="loading">불러오는 중…</div></div>
+  </div>
+  </div>
+  <div class="mover-group volatility-group">
+    <div class="mover-group-title">변동성 모니터</div>
+    <div class="panel volatility-panel">
+      <h2>코인 변동성 TOP 10 <span style="color:var(--muted);font-weight:400;letter-spacing:0;">— 등락·장중범위·거래회전율</span><button class="info-tip" type="button" aria-label="변동성 점수 설명"><span>?</span><span class="info-tip-box"><b>변동성 점수</b>24시간 절대 등락률 45% + 장중범위 35% + 거래회전율 20%를 합산한 상대 지표입니다. 100점 만점이나 매수 신호가 아니며, 숫자가 클수록 움직임과 위험이 큽니다.</span></button></h2>
+      <div id="volatility"><div class="loading">불러오는 중…</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="section-head"><div><h2>경제 캘린더</h2><p>미국·한국·유럽 주요 일정 (KST)</p></div><p>일정을 누르면 실제 결과를 확인할 수 있습니다</p></div>
+<div class="panel calendar-panel">
+  <h2 style="color:var(--amber);">경제 지표 캘린더 <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;">— 미국·한국·유럽 일정·예상·이전 (시간 KST) · 줄 클릭 시 실제결과</span></h2>
+  <div class="calendar-legend"><span class="legend-upcoming">● 발표 예정</span><span class="legend-done">● 발표 완료</span><span class="legend-waiting">● 결과 확인 중</span><span class="legend-stars">★ 중요도 낮음 · ★★★ 중요도 높음</span></div>
+  <div id="calendar"><div class="loading">불러오는 중…</div></div>
+</div>
+
+<div class="section-head"><div><h2>주요 뉴스</h2><p>시장에 영향을 주는 핵심 헤드라인</p></div></div>
+<div class="panel news-panel">
+  <h2 style="color:var(--amber);">뉴스 <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;">— 핵심 뉴스는 노란 줄</span></h2>
+  <div class="news-filters">
+    <button class="nf active" data-cat="전체" onclick="setNewsFilter('전체')">전체</button>
+    <button class="nf" data-cat="코인" onclick="setNewsFilter('코인')">코인</button>
+    <button class="nf" data-cat="미국" onclick="setNewsFilter('미국')">미국</button>
+    <button class="nf" data-cat="주식" onclick="setNewsFilter('주식')">주식</button>
+    <button class="nf" data-cat="경제" onclick="setNewsFilter('경제')">경제</button>
+  </div>
+  <div id="news"><div class="loading">불러오는 중…</div></div>
+</div>
+
+<footer>자동 갱신: 코인·국내 1분 / 미국주식 10분 · 데이터: CoinGecko · 네이버 증권 · FMP · Yahoo Finance · 이투데이 · 연합뉴스 · 블록미디어</footer>
+
+<div id="stock-modal" class="stock-modal" aria-hidden="true">
+  <button class="stock-backdrop" onclick="closeStockDetail()" aria-label="상세창 닫기"></button>
+  <aside class="stock-drawer" role="dialog" aria-modal="true" aria-labelledby="stock-detail-title">
+    <button class="drawer-close" onclick="closeStockDetail()" aria-label="닫기">×</button>
+    <div id="stock-detail"><div class="loading">회사 정보를 불러오는 중…</div></div>
+  </aside>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
