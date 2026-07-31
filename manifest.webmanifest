@@ -1,0 +1,25 @@
+{
+  "name": "마켓 데스크",
+  "short_name": "마켓데스크",
+  "description": "주요 자산, 급등락, 경제 일정과 뉴스를 한눈에 보는 시장 대시보드",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#07101d",
+  "theme_color": "#07101d",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
