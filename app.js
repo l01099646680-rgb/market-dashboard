@@ -110,12 +110,28 @@ async function loadCrypto(){
   }catch(e){ $('crypto').innerHTML='<div class="err">코인 데이터를 불러오지 못했어요. 잠시 후 새로고침.</div>'; }
 }
 
-/* ---------- 급등락 ---------- */
+/* ---------- 코인 급등락: 시총 상위 250 + 실거래 가능성 필터 ---------- */
+const CRYPTO_MIN_24H_VOLUME=20_000_000;
+const CRYPTO_EXCLUDED_SYMBOLS=new Set([
+  'usdt','usdc','dai','fdusd','usde','usdd','tusd','usds','pyusd','frax','crvusd','lusd','gusd','usdp','eurc','usd0','usdtb',
+  'wbtc','cbbtc','weth','steth','wsteth','reth','weeth','eeth','ezeth','meth','jitosol','bnsol'
+]);
+const CRYPTO_EXCLUDED_IDS=new Set([
+  'tether','usd-coin','dai','first-digital-usd','ethena-usde','usdd','true-usd','usds','paypal-usd','frax','crvusd','liquity-usd','gemini-dollar','pax-dollar','eurc','usual-usd','usdtb',
+  'wrapped-bitcoin','coinbase-wrapped-btc','weth','staked-ether','wrapped-steth','rocket-pool-eth','wrapped-eeth','ether-fi-staked-eth','renzo-restaked-eth','mantle-staked-ether','jito-staked-sol','binance-staked-sol'
+]);
+function isTradableCrypto(c){
+  const symbol=String(c.symbol||'').toLowerCase(), id=String(c.id||'').toLowerCase(), name=String(c.name||'');
+  if((Number(c.total_volume)||0)<CRYPTO_MIN_24H_VOLUME) return false;
+  if(CRYPTO_EXCLUDED_SYMBOLS.has(symbol)||CRYPTO_EXCLUDED_IDS.has(id)) return false;
+  if(/\b(?:wrapped|bridged|staked|liquid staking)\b/i.test(name)) return false;
+  return typeof c.price_change_percentage_24h==='number';
+}
 async function loadMovers(){
   try{
     const url='https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1&price_change_percentage=24h';
     const d=await fetchJsonFast(url, v=>Array.isArray(v)&&v.length>0);
-    const valid=d.filter(c=>typeof c.price_change_percentage_24h==='number');
+    const valid=d.filter(isTradableCrypto);
     const sorted=[...valid].sort((a,b)=>b.price_change_percentage_24h-a.price_change_percentage_24h);
     const gain=sorted.slice(0,10), lose=sorted.slice(-10).reverse();
     const render=arr=>arr.map((c,i)=>{
@@ -454,7 +470,7 @@ function renderNewsList(){
   $('news').innerHTML=html;
 }
 
-/* ---------- 미국주식 급등락 (미국 전체 시장, FMP) ---------- */
+/* ---------- 미국주식 급등락 (S&P 500 대형주, FMP) ---------- */
 function getFmpKey(){ return readSaved('fmpKey'); }
 function saveFmpKey(){
   const el=document.getElementById('fmpInput'); if(!el) return;
@@ -465,7 +481,7 @@ function saveFmpKey(){
 function resetFmpKey(){ writeSaved('fmpKey',''); renderUSKeyPrompt(); }
 function renderUSKeyPrompt(){
   $('us-gainers').innerHTML=`<div style="font-size:13px;color:var(--text);line-height:1.7;">
-    미국 <b>전체 시장</b> 급등락을 보려면 무료 키가 <b>한 번</b> 필요해요.<br>
+    미국 <b>S&amp;P 500 대형주</b> 급등락을 보려면 무료 키가 <b>한 번</b> 필요해요.<br>
     <a href="https://site.financialmodelingprep.com/register" target="_blank" style="color:var(--amber);">① 여기서 무료 가입 (이메일만, 카드 X)</a><br>
     ② 가입 후 나오는 <b>API Key</b> 복사<br>
     ③ 아래에 붙여넣고 저장:
@@ -477,8 +493,18 @@ function renderUSKeyPrompt(){
   $('us-losers').innerHTML='<div style="font-size:12px;color:var(--muted);">키를 저장하면 급등·급락이 함께 표시돼요.</div>';
 }
 function parsePct(x){ return parseFloat(String(x).replace(/[()%+,\s]/g,'')); }
+function usPct(c){
+  const n=parsePct(c?.changePercentage??c?.changesPercentage??c?.changePercent??c?.change_percentage);
+  return Number.isFinite(n)?n:NaN;
+}
 function trimName(n,sym){ n=(n||sym||'').trim(); return n.length>22? n.slice(0,21)+'…' : n; }
-const US_NAME_KO={AAPL:'애플',MSFT:'마이크로소프트',NVDA:'엔비디아',GOOGL:'알파벳',GOOG:'알파벳',AMZN:'아마존',META:'메타',TSLA:'테슬라',VEEE:'트윈 비 파워캣츠'};
+const US_NAME_KO={
+  AAPL:'애플',MSFT:'마이크로소프트',NVDA:'엔비디아',GOOGL:'알파벳',GOOG:'알파벳',AMZN:'아마존',META:'메타',TSLA:'테슬라',
+  AVGO:'브로드컴','BRK.B':'버크셔 해서웨이','BRK-B':'버크셔 해서웨이',JPM:'JP모건',LLY:'일라이 릴리',WMT:'월마트',XOM:'엑슨모빌',
+  V:'비자',MA:'마스터카드',COST:'코스트코',NFLX:'넷플릭스',AMD:'AMD',MU:'마이크론',ORCL:'오라클',CRM:'세일즈포스',
+  HD:'홈디포',BAC:'뱅크오브아메리카',KO:'코카콜라',PEP:'펩시코',DIS:'디즈니',INTC:'인텔',QCOM:'퀄컴',IBM:'IBM',
+  UBER:'우버',PLTR:'팔란티어',COIN:'코인베이스',ABNB:'에어비앤비'
+};
 const US_WORD_KO=[
   [/Twin Vee Powercats/gi,'트윈 비 파워캣츠'],[/Artificial Intelligence/gi,'인공지능'],[/Electric Vehicle/gi,'전기차'],
   [/Technologies/gi,'테크놀로지스'],[/Technology/gi,'테크놀로지'],[/Therapeutics/gi,'테라퓨틱스'],[/Pharmaceuticals/gi,'파마슈티컬스'],
@@ -498,8 +524,9 @@ function koUsName(name,symbol){
   return out||symbol;
 }
 function renderFmpRows(arr){
+  if(!arr?.length) return '<div class="loading">조건에 맞는 종목이 없어요.</div>';
   return arr.slice(0,10).map((c,i)=>{
-    const ch=parsePct(c.changesPercentage);
+    const ch=usPct(c);
     const enName=c.name||c.symbol, koName=koUsName(enName,c.symbol);
     return `<button class="row stock-row" data-market="US" data-symbol="${escAttr(c.symbol)}" data-name="${escAttr(koName)}" data-en-name="${escAttr(enName)}" data-price="$${escAttr(fmtPrice(c.price))}" data-change="${ch}" onclick="openStockDetailFromRow(this)">
       <div class="name"><span class="rank">${i+1}</span>${trimName(koName,c.symbol)}<small>${trimName(enName,c.symbol)} · ${c.symbol}</small></div>
@@ -509,27 +536,82 @@ function renderFmpRows(arr){
       </div></button>`;
   }).join('');
 }
+const SP500_MEMBER_CACHE_KEY='sp500MembersV1';
+const US_MOVER_CACHE_KEY='usSp500MoversV1';
+let _usMoversLoading=false;
+function readLocalJson(key){ try{return JSON.parse(localStorage.getItem(key)||'null');}catch(e){return null;} }
+function writeLocalJson(key,value){ try{localStorage.setItem(key,JSON.stringify(value));}catch(e){} }
+async function getSp500Members(base,key){
+  const cached=readLocalJson(SP500_MEMBER_CACHE_KEY), maxAge=7*24*60*60*1000;
+  if(cached?.members?.length>=450&&Date.now()-cached.savedAt<maxAge) return cached.members;
+  try{
+    const r=await fetchT(`${base}/sp500-constituent?apikey=${encodeURIComponent(key)}`,10000);
+    if(!r.ok) throw new Error('S&P 500 HTTP '+r.status);
+    const data=await r.json();
+    const members=(Array.isArray(data)?data:[]).map(x=>({symbol:String(x.symbol||'').trim(),name:x.name||x.companyName||x.symbol})).filter(x=>x.symbol);
+    if(members.length<450) throw new Error('S&P 500 종목 목록 부족');
+    writeLocalJson(SP500_MEMBER_CACHE_KEY,{members,savedAt:Date.now()});
+    return members;
+  }catch(e){
+    if(cached?.members?.length>=450) return cached.members;
+    throw e;
+  }
+}
+async function getSp500Quotes(base,key,members){
+  const symbols=members.map(x=>x.symbol).filter(Boolean).join(',');
+  const r=await fetchT(`${base}/batch-quote?symbols=${encodeURIComponent(symbols)}&apikey=${encodeURIComponent(key)}`,15000);
+  if(!r.ok) throw new Error('S&P 500 시세 HTTP '+r.status);
+  const data=await r.json();
+  if(!Array.isArray(data)) throw new Error('S&P 500 시세 형식 오류');
+  const names=new Map(members.map(x=>[x.symbol,x.name]));
+  return data.map(q=>({...q,name:q.name||names.get(q.symbol)||q.symbol,changePercentage:usPct(q)}))
+    .filter(q=>q.symbol&&Number(q.price)>0&&Number.isFinite(q.changePercentage));
+}
 async function loadUSStocks(){
   const key=getFmpKey();
   if(!key){ renderUSKeyPrompt(); return; }
+  const cached=readLocalJson(US_MOVER_CACHE_KEY);
+  if(cached?.gainers?.length&&cached?.losers?.length){
+    $('us-gainers').innerHTML=renderFmpRows(cached.gainers);
+    $('us-losers').innerHTML=renderFmpRows(cached.losers);
+  }
+  if(_usMoversLoading) return;
+  _usMoversLoading=true;
   try{
     const base='https://financialmodelingprep.com/stable';
-    const [gR,lR]=await Promise.all([
-      fetch(`${base}/biggest-gainers?apikey=${key}`),
-      fetch(`${base}/biggest-losers?apikey=${key}`),
-    ]);
-    const g=await gR.json(), l=await lR.json();
-    if(!Array.isArray(g)||!Array.isArray(l)){
-      $('us-gainers').innerHTML='<div class="err">키가 올바르지 않거나 하루 한도(250회) 초과예요. <a href="#" onclick="resetFmpKey();return false;" style="color:var(--amber)">키 다시 입력</a></div>';
-      $('us-losers').innerHTML='';
-      return;
-    }
+    const members=await getSp500Members(base,key);
+    const quotes=await getSp500Quotes(base,key,members);
+    const gain=[...quotes].filter(q=>usPct(q)>0).sort((a,b)=>usPct(b)-usPct(a)).slice(0,10);
+    const lose=[...quotes].filter(q=>usPct(q)<0).sort((a,b)=>usPct(a)-usPct(b)).slice(0,10);
+    if(!gain.length||!lose.length) throw new Error('S&P 500 급등락 종목 부족');
+    const g=gain.map(q=>({...q,changesPercentage:usPct(q)}));
+    const l=lose.map(q=>({...q,changesPercentage:usPct(q)}));
     $('us-gainers').innerHTML=renderFmpRows(g);
     $('us-losers').innerHTML=renderFmpRows(l);
-  }catch(e){ $('us-gainers').innerHTML='<div class="err">불러오기 실패 — 새로고침 해보세요</div>'; $('us-losers').innerHTML=''; }
+    writeLocalJson(US_MOVER_CACHE_KEY,{gainers:g,losers:l,savedAt:Date.now()});
+  }catch(e){
+    if(!cached?.gainers?.length){
+      $('us-gainers').innerHTML='<div class="err">S&P 500 시세를 불러오지 못했어요. 키 또는 하루 한도를 확인해 주세요. <a href="#" onclick="resetFmpKey();return false;" style="color:var(--amber)">키 다시 입력</a></div>';
+      $('us-losers').innerHTML='';
+    }
+  }finally{
+    _usMoversLoading=false;
+  }
 }
 
-/* ---------- 국내주식 급등락 (네이버 증권) ---------- */
+/* ---------- 국내주식 급등락: 보통주 + 거래대금 필터 ---------- */
+const KR_MIN_PRICE=1_000;
+const KR_MIN_TRADING_VALUE=5_000_000_000;
+const KR_PRODUCT_RE=/(?:ETF|ETN|스팩|SPAC|레버리지|인버스|커버드콜|선물|합성)/i;
+const KR_FUND_BRAND_RE=/^(?:KODEX|TIGER|RISE|ACE|PLUS|HANARO|KIWOOM|KOSEF|SOL|KoAct|TIMEFOLIO|WON|1Q|BNK|FOCUS|UNICORN|DAISHIN343|ARIRANG|TREX|KBSTAR|KINDEX)(?:\s|$)/i;
+function krNumber(v){ return Number(String(v||'').replace(/[^0-9.-]/g,''))||0; }
+function isKrCommonStock(name,code){
+  if(!/^\d{6}$/.test(code)) return false;
+  if(KR_PRODUCT_RE.test(name)||KR_FUND_BRAND_RE.test(name)) return false;
+  if(/(?:\d+)?우(?:B|C)?$|우선주$/i.test(name)) return false;
+  return true;
+}
+function formatKrTradingValue(value){ return `${Math.round(value/100_000_000).toLocaleString('ko-KR')}억`; }
 async function fetchNaverRank(pageUrl){
   const parse=async r=>{
       const buf=await r.arrayBuffer();
@@ -540,35 +622,34 @@ async function fetchNaverRank(pageUrl){
         const a=tr.querySelector('a.tltle');
         if(!a) continue;
         const tds=tr.querySelectorAll('td');
-        if(tds.length<5) continue;
+        if(tds.length<6) continue;
         const name=a.textContent.trim();
-        const code=(a.getAttribute('href')||'').match(/code=(\d{6})/)?.[1]||'';
-        const price=tds[2].textContent.trim();
+        const code=(a.getAttribute('href')||'').match(/code=([0-9A-Z]{6})/i)?.[1]||'';
+        const priceText=tds[2].textContent.trim(), price=krNumber(priceText), volume=krNumber(tds[5].textContent);
         const ch=parseFloat(tds[4].textContent.replace(/[\s%+]/g,''));
-        if(!name||isNaN(ch)) continue;
-        out.push({name, code, price, ch});
+        const tradingValue=price*volume;
+        if(!name||isNaN(ch)||!isKrCommonStock(name,code)||price<KR_MIN_PRICE||tradingValue<KR_MIN_TRADING_VALUE) continue;
+        const market=new URL(pageUrl).searchParams.get('sosok')==='1'?'KOSDAQ':'KOSPI';
+        out.push({name,code,price:priceText,priceNumber:price,volume,tradingValue,ch,market});
       }
-      if(!out.length) throw new Error('종목 표를 찾지 못함');
       return out;
   };
-  const candidates=[pageUrl,...PROXIES().map(p=>p(pageUrl))];
-  const jobs=candidates.map(async url=>{
-    const r=await fetchT(url,7000);
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    return parse(r);
-  });
-  try{
-    if(typeof Promise.any==='function') return await Promise.any(jobs);
-    for(const job of jobs){ try{return await job;}catch(e){} }
-  }catch(e){}
+  const candidates=[...PROXIES().map(p=>p(pageUrl)),pageUrl];
+  for(const url of candidates){
+    try{
+      const r=await fetchT(url,7000);
+      if(!r.ok) continue;
+      return await parse(r);
+    }catch(e){}
+  }
   return null;
 }
 function renderKRRows(arr){
   return arr.map((s,i)=>{
     return `<button class="row stock-row" data-market="KR" data-symbol="${escAttr(s.code)}" data-code="${escAttr(s.code)}" data-name="${escAttr(s.name)}" data-price="${escAttr(s.price)}" data-change="${s.ch}" onclick="openStockDetailFromRow(this)">
-    <div class="name"><span class="rank">${i+1}</span>${s.name}</div>
+    <div class="name"><span class="rank">${i+1}</span>${escHtml(s.name)}<small>${escHtml(s.market)} · 거래대금 ${formatKrTradingValue(s.tradingValue)}</small></div>
     <div class="val">
-      <div class="price">${s.price}</div>
+      <div class="price">${escHtml(s.price)}</div>
       <div class="chg ${chgClass(s.ch)}">${arrow(s.ch)} ${chgStr(s.ch)}</div>
     </div></button>`;
   }).join('');
@@ -755,25 +836,42 @@ function renderKrStockDetail(stock){
 async function loadKrStockDetail(stock){
   renderKrStockDetail(stock);
 }
-function readKrCache(){ try{return JSON.parse(localStorage.getItem('krRankCache')||'null')||{gain:null,lose:null};}catch(e){return {gain:null,lose:null};} }
+const KR_RANK_CACHE_KEY='krRankFilteredV2';
+function readKrCache(){ try{return JSON.parse(localStorage.getItem(KR_RANK_CACHE_KEY)||'null')||{gain:null,lose:null};}catch(e){return {gain:null,lose:null};} }
 let _krCache=readKrCache();
+let _krLoading=false;
+function mergeKrRows(...groups){
+  const byCode=new Map();
+  for(const group of groups){
+    for(const row of (Array.isArray(group)?group:[])) byCode.set(row.code,row);
+  }
+  return [...byCode.values()];
+}
 function krRankError(url){ return `<div class="err">네이버 순위 연결이 지연되고 있어요.<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:9px"><button class="refresh" onclick="loadKRStocks()">다시 시도</button><a class="detail-action" href="${url}" target="_blank" rel="noopener">네이버에서 보기 ↗</a></div></div>`; }
 async function loadKRStocks(){
+  if(_krLoading) return;
   if(_krCache.gain) $('kr-gainers').innerHTML=renderKRRows(_krCache.gain.slice(0,10));
   if(_krCache.lose) $('kr-losers').innerHTML=renderKRRows(_krCache.lose.slice(0,10));
+  _krLoading=true;
   try{
-    const [rise,fall]=await Promise.all([
-      fetchNaverRank('https://finance.naver.com/sise/sise_rise.naver'),
-      fetchNaverRank('https://finance.naver.com/sise/sise_fall.naver'),
+    const [kospiRise,kosdaqRise,kospiFall,kosdaqFall]=await Promise.all([
+      fetchNaverRank('https://finance.naver.com/sise/sise_rise.naver?sosok=0'),
+      fetchNaverRank('https://finance.naver.com/sise/sise_rise.naver?sosok=1'),
+      fetchNaverRank('https://finance.naver.com/sise/sise_fall.naver?sosok=0'),
+      fetchNaverRank('https://finance.naver.com/sise/sise_fall.naver?sosok=1'),
     ]);
-    if(rise&&rise.length) _krCache.gain=rise;
-    if(fall&&fall.length) _krCache.lose=fall;
-    if(rise||fall){ try{localStorage.setItem('krRankCache',JSON.stringify(_krCache));}catch(e){} }
-    $('kr-gainers').innerHTML = _krCache.gain? renderKRRows(_krCache.gain.slice(0,10)) : krRankError('https://finance.naver.com/sise/sise_rise.naver');
-    $('kr-losers').innerHTML  = _krCache.lose? renderKRRows(_krCache.lose.slice(0,10)) : krRankError('https://finance.naver.com/sise/sise_fall.naver');
+    const rise=mergeKrRows(kospiRise,kosdaqRise).filter(s=>s.ch>0).sort((a,b)=>b.ch-a.ch).slice(0,10);
+    const fall=mergeKrRows(kospiFall,kosdaqFall).filter(s=>s.ch<0).sort((a,b)=>a.ch-b.ch).slice(0,10);
+    if(rise.length) _krCache.gain=rise;
+    if(fall.length) _krCache.lose=fall;
+    if(rise.length||fall.length){ try{localStorage.setItem(KR_RANK_CACHE_KEY,JSON.stringify(_krCache));}catch(e){} }
+    $('kr-gainers').innerHTML = _krCache.gain?.length? renderKRRows(_krCache.gain.slice(0,10)) : krRankError('https://finance.naver.com/sise/sise_rise.naver');
+    $('kr-losers').innerHTML  = _krCache.lose?.length? renderKRRows(_krCache.lose.slice(0,10)) : krRankError('https://finance.naver.com/sise/sise_fall.naver');
   }catch(e){
     if(!_krCache.gain) $('kr-gainers').innerHTML=krRankError('https://finance.naver.com/sise/sise_rise.naver');
     if(!_krCache.lose) $('kr-losers').innerHTML=krRankError('https://finance.naver.com/sise/sise_fall.naver');
+  }finally{
+    _krLoading=false;
   }
 }
 
@@ -902,7 +1000,7 @@ setTimeout(loadKRStocks, 38000);
 // 갱신 주기 (프록시 부담 분산)
 setInterval(loadAll,     60000);   // 코인·공포탐욕: 1분
 setInterval(loadMetrics, 120000);  // 지수·환율·원자재·크립토지표: 2분
-setInterval(loadKRStocks,90000);   // 국내주식: 1.5분
+setInterval(loadKRStocks,180000);  // 국내주식: 3분
 setInterval(loadNews,    180000);  // 뉴스: 3분
 setInterval(loadUSStocks,600000);  // 미국주식: 10분 (무료 한도 절약)
 setInterval(loadCalendar,600000);  // 경제 캘린더: 10분 (발표값 갱신)
