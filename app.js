@@ -470,7 +470,7 @@ function renderNewsList(){
   $('news').innerHTML=html;
 }
 
-/* ---------- 미국주식 급등락 (S&P 500 대형주, FMP) ---------- */
+/* ---------- 미국주식 급등락 (대표 대형주 80, Yahoo 묶음 시세) ---------- */
 function getFmpKey(){ return readSaved('fmpKey'); }
 function saveFmpKey(){
   const el=document.getElementById('fmpInput'); if(!el) return;
@@ -503,7 +503,14 @@ const US_NAME_KO={
   AVGO:'브로드컴','BRK.B':'버크셔 해서웨이','BRK-B':'버크셔 해서웨이',JPM:'JP모건',LLY:'일라이 릴리',WMT:'월마트',XOM:'엑슨모빌',
   V:'비자',MA:'마스터카드',COST:'코스트코',NFLX:'넷플릭스',AMD:'AMD',MU:'마이크론',ORCL:'오라클',CRM:'세일즈포스',
   HD:'홈디포',BAC:'뱅크오브아메리카',KO:'코카콜라',PEP:'펩시코',DIS:'디즈니',INTC:'인텔',QCOM:'퀄컴',IBM:'IBM',
-  UBER:'우버',PLTR:'팔란티어',COIN:'코인베이스',ABNB:'에어비앤비'
+  UBER:'우버',PLTR:'팔란티어',COIN:'코인베이스',ABNB:'에어비앤비',JNJ:'존슨앤드존슨',PG:'P&G',ABBV:'애브비',
+  GE:'GE 에어로스페이스',CSCO:'시스코',PM:'필립모리스',UNH:'유나이티드헬스',CVX:'셰브론',ABT:'애보트',MCD:'맥도날드',
+  LIN:'린데',MRK:'머크',WFC:'웰스파고',TMO:'써모피셔',CAT:'캐터필러',AXP:'아메리칸 익스프레스',INTU:'인튜이트',
+  AMGN:'암젠',GS:'골드만삭스',ISRG:'인튜이티브 서지컬',NOW:'서비스나우',RTX:'RTX',VZ:'버라이즌',BKNG:'부킹홀딩스',
+  SPGI:'S&P 글로벌',TXN:'텍사스 인스트루먼츠',DHR:'다나허',NEE:'넥스트에라 에너지',C:'씨티그룹',BLK:'블랙록',
+  AMAT:'어플라이드 머티어리얼즈',PFE:'화이자',SCHW:'찰스슈왑',BA:'보잉',LOW:'로우스',HON:'허니웰',GILD:'길리어드',
+  TJX:'TJX',SYK:'스트라이커',ADP:'ADP',DE:'디어',COP:'코노코필립스',PANW:'팔로알토 네트웍스',APP:'앱러빈',
+  LRCX:'램리서치',ANET:'아리스타 네트웍스',CRWD:'크라우드스트라이크',KLAC:'KLA',MDLZ:'몬델리즈',SBUX:'스타벅스'
 };
 const US_WORD_KO=[
   [/Twin Vee Powercats/gi,'트윈 비 파워캣츠'],[/Artificial Intelligence/gi,'인공지능'],[/Electric Vehicle/gi,'전기차'],
@@ -536,40 +543,48 @@ function renderFmpRows(arr){
       </div></button>`;
   }).join('');
 }
-const SP500_MEMBER_CACHE_KEY='sp500MembersV1';
-const US_MOVER_CACHE_KEY='usSp500MoversV1';
+const US_LARGE_CAPS=[
+  ['AAPL','Apple'],['MSFT','Microsoft'],['NVDA','NVIDIA'],['AMZN','Amazon'],['GOOGL','Alphabet'],['META','Meta Platforms'],
+  ['AVGO','Broadcom'],['BRK-B','Berkshire Hathaway'],['TSLA','Tesla'],['JPM','JPMorgan Chase'],['WMT','Walmart'],['LLY','Eli Lilly'],
+  ['V','Visa'],['ORCL','Oracle'],['MA','Mastercard'],['XOM','Exxon Mobil'],['NFLX','Netflix'],['COST','Costco'],['JNJ','Johnson & Johnson'],
+  ['HD','Home Depot'],['PG','Procter & Gamble'],['BAC','Bank of America'],['ABBV','AbbVie'],['KO','Coca-Cola'],['PLTR','Palantir'],
+  ['GE','GE Aerospace'],['CSCO','Cisco'],['AMD','AMD'],['IBM','IBM'],['PM','Philip Morris'],['UNH','UnitedHealth'],['CVX','Chevron'],
+  ['CRM','Salesforce'],['ABT','Abbott Laboratories'],['MCD','McDonald’s'],['LIN','Linde'],['DIS','Walt Disney'],['MRK','Merck'],
+  ['WFC','Wells Fargo'],['TMO','Thermo Fisher'],['CAT','Caterpillar'],['AXP','American Express'],['QCOM','Qualcomm'],['INTU','Intuit'],
+  ['AMGN','Amgen'],['GS','Goldman Sachs'],['ISRG','Intuitive Surgical'],['NOW','ServiceNow'],['RTX','RTX'],['VZ','Verizon'],
+  ['PEP','PepsiCo'],['BKNG','Booking Holdings'],['SPGI','S&P Global'],['TXN','Texas Instruments'],['DHR','Danaher'],['NEE','NextEra Energy'],
+  ['C','Citigroup'],['BLK','BlackRock'],['AMAT','Applied Materials'],['PFE','Pfizer'],['SCHW','Charles Schwab'],['BA','Boeing'],
+  ['LOW','Lowe’s'],['HON','Honeywell'],['GILD','Gilead Sciences'],['TJX','TJX Companies'],['UBER','Uber'],['SYK','Stryker'],
+  ['ADP','ADP'],['DE','Deere'],['COP','ConocoPhillips'],['PANW','Palo Alto Networks'],['MU','Micron'],['APP','AppLovin'],
+  ['LRCX','Lam Research'],['ANET','Arista Networks'],['CRWD','CrowdStrike'],['KLAC','KLA'],['MDLZ','Mondelez'],['SBUX','Starbucks']
+].map(([symbol,name])=>({symbol,name}));
+const US_MOVER_CACHE_KEY='usLargeCapMoversV2';
 let _usMoversLoading=false;
 function readLocalJson(key){ try{return JSON.parse(localStorage.getItem(key)||'null');}catch(e){return null;} }
 function writeLocalJson(key,value){ try{localStorage.setItem(key,JSON.stringify(value));}catch(e){} }
-async function getSp500Members(base,key){
-  const cached=readLocalJson(SP500_MEMBER_CACHE_KEY), maxAge=7*24*60*60*1000;
-  if(cached?.members?.length>=450&&Date.now()-cached.savedAt<maxAge) return cached.members;
-  try{
-    const r=await fetchT(`${base}/sp500-constituent?apikey=${encodeURIComponent(key)}`,10000);
-    if(!r.ok) throw new Error('S&P 500 HTTP '+r.status);
-    const data=await r.json();
-    const members=(Array.isArray(data)?data:[]).map(x=>({symbol:String(x.symbol||'').trim(),name:x.name||x.companyName||x.symbol})).filter(x=>x.symbol);
-    if(members.length<450) throw new Error('S&P 500 종목 목록 부족');
-    writeLocalJson(SP500_MEMBER_CACHE_KEY,{members,savedAt:Date.now()});
-    return members;
-  }catch(e){
-    if(cached?.members?.length>=450) return cached.members;
-    throw e;
+async function fetchLargeCapSpark(symbols){
+  const q=symbols.map(encodeURIComponent).join(',');
+  const target=`https://query1.finance.yahoo.com/v8/finance/spark?symbols=${q}&range=1d&interval=1d`;
+  const candidates=[...PROXIES().map(p=>p(target)),target];
+  for(const url of candidates){
+    try{
+      const r=await fetchT(url,9000);
+      if(!r.ok) continue;
+      const d=await r.json(), res=d.spark&&d.spark.result;
+      if(!Array.isArray(res)||!res.length) continue;
+      const map={};
+      for(const it of res){
+        const m=it.response&&it.response[0]&&it.response[0].meta;
+        if(!m||typeof m.regularMarketPrice!=='number') continue;
+        const prev=m.chartPreviousClose||m.previousClose;
+        if(prev) map[it.symbol]={price:m.regularMarketPrice,ch:((m.regularMarketPrice-prev)/prev)*100};
+      }
+      if(Object.keys(map).length>=30) return map;
+    }catch(e){}
   }
-}
-async function getSp500Quotes(base,key,members){
-  const symbols=members.map(x=>x.symbol).filter(Boolean).join(',');
-  const r=await fetchT(`${base}/batch-quote?symbols=${encodeURIComponent(symbols)}&apikey=${encodeURIComponent(key)}`,15000);
-  if(!r.ok) throw new Error('S&P 500 시세 HTTP '+r.status);
-  const data=await r.json();
-  if(!Array.isArray(data)) throw new Error('S&P 500 시세 형식 오류');
-  const names=new Map(members.map(x=>[x.symbol,x.name]));
-  return data.map(q=>({...q,name:q.name||names.get(q.symbol)||q.symbol,changePercentage:usPct(q)}))
-    .filter(q=>q.symbol&&Number(q.price)>0&&Number.isFinite(q.changePercentage));
+  return null;
 }
 async function loadUSStocks(){
-  const key=getFmpKey();
-  if(!key){ renderUSKeyPrompt(); return; }
   const cached=readLocalJson(US_MOVER_CACHE_KEY);
   if(cached?.gainers?.length&&cached?.losers?.length){
     $('us-gainers').innerHTML=renderFmpRows(cached.gainers);
@@ -578,12 +593,16 @@ async function loadUSStocks(){
   if(_usMoversLoading) return;
   _usMoversLoading=true;
   try{
-    const base='https://financialmodelingprep.com/stable';
-    const members=await getSp500Members(base,key);
-    const quotes=await getSp500Quotes(base,key,members);
+    const map=await fetchLargeCapSpark(US_LARGE_CAPS.map(x=>x.symbol));
+    if(!map) throw new Error('대형주 묶음 시세 없음');
+    const quotes=US_LARGE_CAPS.map(c=>{
+      const q=map[c.symbol];
+      return q?{symbol:c.symbol,name:c.name,price:q.price,changePercentage:q.ch}:null;
+    }).filter(Boolean);
+    if(quotes.length<30) throw new Error('대형주 시세 부족');
     const gain=[...quotes].filter(q=>usPct(q)>0).sort((a,b)=>usPct(b)-usPct(a)).slice(0,10);
     const lose=[...quotes].filter(q=>usPct(q)<0).sort((a,b)=>usPct(a)-usPct(b)).slice(0,10);
-    if(!gain.length||!lose.length) throw new Error('S&P 500 급등락 종목 부족');
+    if(!gain.length||!lose.length) throw new Error('대형주 급등락 종목 부족');
     const g=gain.map(q=>({...q,changesPercentage:usPct(q)}));
     const l=lose.map(q=>({...q,changesPercentage:usPct(q)}));
     $('us-gainers').innerHTML=renderFmpRows(g);
@@ -591,8 +610,9 @@ async function loadUSStocks(){
     writeLocalJson(US_MOVER_CACHE_KEY,{gainers:g,losers:l,savedAt:Date.now()});
   }catch(e){
     if(!cached?.gainers?.length){
-      $('us-gainers').innerHTML='<div class="err">S&P 500 시세를 불러오지 못했어요. 키 또는 하루 한도를 확인해 주세요. <a href="#" onclick="resetFmpKey();return false;" style="color:var(--amber)">키 다시 입력</a></div>';
-      $('us-losers').innerHTML='';
+      const msg='<div class="err">미국 대형주 시세 연결이 지연되고 있어요.<br><button class="refresh" onclick="loadUSStocks()" style="margin-top:8px">다시 시도</button></div>';
+      $('us-gainers').innerHTML=msg;
+      $('us-losers').innerHTML=msg;
     }
   }finally{
     _usMoversLoading=false;
