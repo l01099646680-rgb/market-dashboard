@@ -247,28 +247,37 @@ const METRICS=[
 ];
 // 대장주 (Yahoo 묶음 호출에 함께 실어 가져옴)
 const US_LEADERS=[
-  {sym:'AAPL',  name:'애플'},
-  {sym:'MSFT',  name:'마이크로소프트'},
   {sym:'NVDA',  name:'엔비디아'},
+  {sym:'AAPL',  name:'애플'},
   {sym:'GOOGL', name:'알파벳'},
+  {sym:'MSFT',  name:'마이크로소프트'},
   {sym:'AMZN',  name:'아마존'},
   {sym:'META',  name:'메타'},
+  {sym:'AVGO',  name:'브로드컴'},
   {sym:'TSLA',  name:'테슬라'},
+  {sym:'BRK-B', name:'버크셔 해서웨이'},
+  {sym:'JPM',   name:'JP모건'},
 ];
 const KR_LEADERS=[
   {sym:'005930.KS', code:'005930', name:'삼성전자'},
   {sym:'000660.KS', code:'000660', name:'SK하이닉스'},
-  {sym:'373220.KS', code:'373220', name:'LG에너지솔루션'},
-  {sym:'207940.KS', code:'207940', name:'삼성바이오로직스'},
+  {sym:'402340.KS', code:'402340', name:'SK스퀘어'},
   {sym:'005380.KS', code:'005380', name:'현대차'},
-  {sym:'035420.KS', code:'035420', name:'NAVER'},
-  {sym:'035720.KS', code:'035720', name:'카카오'},
+  {sym:'009150.KS', code:'009150', name:'삼성전기'},
+  {sym:'373220.KS', code:'373220', name:'LG에너지솔루션'},
+  {sym:'032830.KS', code:'032830', name:'삼성생명'},
+  {sym:'028260.KS', code:'028260', name:'삼성물산'},
+  {sym:'329180.KS', code:'329180', name:'HD현대중공업'},
+  {sym:'105560.KS', code:'105560', name:'KB금융'},
 ];
 let _usdkrw=null;
 async function fetchYahoo(sym){
-  const target=`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}`;
-  try{
-      const r=await fetchProxyFast(target,7000);
+  const target=`https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}`;
+  const candidates=[...PROXIES().map(p=>p(target)),target];
+  for(const url of candidates){
+    try{
+      const r=await fetchT(url,7000);
+      if(!r.ok) continue;
       const d=await r.json();
       const m=d.chart.result[0].meta;
       const price=m.regularMarketPrice;
@@ -276,28 +285,50 @@ async function fetchYahoo(sym){
       const ch=((price-prev)/prev)*100;
       return {price,ch};
     }catch(e){}
+  }
   return null;
 }
-// 여러 심볼을 한 번에 (프록시 요청 11개 → 1개)
-async function fetchSpark(symbols){
+// Yahoo 제한(요청당 최대 20종목)에 맞춰 작은 묶음으로 조회
+async function fetchSparkChunk(symbols){
   const q=symbols.map(encodeURIComponent).join(',');
-  const target=`https://query1.finance.yahoo.com/v8/finance/spark?symbols=${q}&range=1d&interval=1d`;
-  try{
-      const r=await fetchProxyFast(target,7500);
+  const target=`https://query2.finance.yahoo.com/v8/finance/spark?symbols=${q}&range=1d&interval=1d`;
+  const candidates=[...PROXIES().map(p=>p(target)),target];
+  for(const url of candidates){
+    try{
+      const r=await fetchT(url,8500);
+      if(!r.ok) continue;
       const d=await r.json();
-      const res=d.spark&&d.spark.result;
-      if(!res) return null;
       const map={};
-      res.forEach(it=>{
-        const m=it.response&&it.response[0]&&it.response[0].meta;
-        if(m && typeof m.regularMarketPrice==='number'){
-          const prev=m.chartPreviousClose||m.previousClose;
-          map[it.symbol]={price:m.regularMarketPrice, ch:prev?((m.regularMarketPrice-prev)/prev)*100:0};
+      const res=d.spark&&d.spark.result;
+      if(Array.isArray(res)){
+        res.forEach(it=>{
+          const m=it.response&&it.response[0]&&it.response[0].meta;
+          if(m && typeof m.regularMarketPrice==='number'){
+            const prev=m.chartPreviousClose||m.previousClose;
+            map[it.symbol]={price:m.regularMarketPrice,ch:prev?((m.regularMarketPrice-prev)/prev)*100:0};
+          }
+        });
+      }else{
+        // 현재 Yahoo Spark 응답: 심볼을 키로 쓰는 객체 형태
+        for(const [key,it] of Object.entries(d||{})){
+          if(!it||!Array.isArray(it.close)) continue;
+          const price=[...it.close].reverse().find(v=>typeof v==='number');
+          const prev=it.chartPreviousClose||it.previousClose;
+          if(typeof price==='number'&&prev) map[it.symbol||key]={price,ch:((price-prev)/prev)*100};
         }
-      });
+      }
       if(Object.keys(map).length) return map;
     }catch(e){}
+  }
   return null;
+}
+async function fetchSpark(symbols){
+  const unique=[...new Set(symbols)].filter(Boolean);
+  const chunks=[];
+  for(let i=0;i<unique.length;i+=20) chunks.push(unique.slice(i,i+20));
+  const maps=await mapPool(chunks,chunk=>fetchSparkChunk(chunk),2);
+  const merged=Object.assign({},...maps.filter(Boolean));
+  return Object.keys(merged).length?merged:null;
 }
 function fmtMetricVal(item, price){
   if(item.pct) return price.toFixed(2)+'%';
@@ -324,6 +355,7 @@ async function mapPool(items, worker, poolSize){
   return out;
 }
 const _metricCache={};
+let _metricsLoading=false;
 function leaderRows(list, cur){
   return list.map(it=>{
     const market=cur==='₩'?'KR':'US';
@@ -337,33 +369,40 @@ function leaderRows(list, cur){
   }).join('');
 }
 async function loadMetrics(){
-  const ALL=[...METRICS, ...US_LEADERS, ...KR_LEADERS];
-  // 1차: 한 번에 묶음 호출 (프록시 1요청)
-  const map=await fetchSpark(ALL.map(m=>m.sym));
-  if(map){ for(const m of ALL){ if(map[m.sym]) _metricCache[m.sym]=map[m.sym]; } }
-  // 2차: 빠진 항목만 개별 호출 (동시 3개)
-  const missing=ALL.filter(m=>!_metricCache[m.sym]);
-  if(missing.length){
-    await mapPool(missing, async m=>{
-      const data=await fetchYahoo(m.sym);
-      if(data) _metricCache[m.sym]=data;
-    }, 3);
+  if(_metricsLoading) return;
+  _metricsLoading=true;
+  try{
+    const ALL=[...new Map([...US_LARGE_CAPS,...KR_LEADERS,...METRICS].map(m=>[m.sym,m])).values()];
+    const CORE=[...new Map([...METRICS,...US_LEADERS,...KR_LEADERS].map(m=>[m.sym,m])).values()];
+    // 1차: 전체 55개를 Yahoo 제한에 맞춘 3개 묶음으로 조회
+    const map=await fetchSpark(ALL.map(m=>m.sym));
+    if(map){ for(const m of ALL){ if(map[m.sym]) _metricCache[m.sym]=map[m.sym]; } }
+    // 2차: 묶음에서 빠진 핵심 지표·대장주만 제한적으로 보완
+    const missing=CORE.filter(m=>!_metricCache[m.sym]).slice(0,20);
+    if(missing.length){
+      await mapPool(missing, async m=>{
+        const data=await fetchYahoo(m.sym);
+        if(data) _metricCache[m.sym]=data;
+      }, 3);
+    }
+    const groups={index:'',fx:'',comm:''};
+    METRICS.forEach(m=>{
+      const data=_metricCache[m.sym];
+      if(m.sym==='KRW=X' && data) _usdkrw=data.price;
+      if(!data){ groups[m.grp]+=metricRow(m.name,'—',NaN,m.note,'',m.tv); return; }
+      groups[m.grp]+=metricRow(m.name, fmtMetricVal(m, data.price), data.ch, m.note, '', m.tv);
+    });
+    $('grp-index').innerHTML=groups.index;
+    $('grp-fx').innerHTML=groups.fx;
+    $('grp-comm').innerHTML=groups.comm;
+    $('us-leaders').innerHTML=leaderRows(US_LEADERS,'$');
+    $('kr-leaders').innerHTML=leaderRows(KR_LEADERS,'₩');
+    renderUSMoversFromMetricCache();
+    updateTicker();
+    loadCryptoMetrics();
+  }finally{
+    _metricsLoading=false;
   }
-  // 렌더 (캐시값 사용 → 이번에 실패해도 마지막 값 유지)
-  const groups={index:'',fx:'',comm:''};
-  METRICS.forEach(m=>{
-    const data=_metricCache[m.sym];
-    if(m.sym==='KRW=X' && data) _usdkrw=data.price;
-    if(!data){ groups[m.grp]+=metricRow(m.name,'—',NaN,m.note,'',m.tv); return; }
-    groups[m.grp]+=metricRow(m.name, fmtMetricVal(m, data.price), data.ch, m.note, '', m.tv);
-  });
-  $('grp-index').innerHTML=groups.index;
-  $('grp-fx').innerHTML=groups.fx;
-  $('grp-comm').innerHTML=groups.comm;
-  $('us-leaders').innerHTML=leaderRows(US_LEADERS,'$');
-  $('kr-leaders').innerHTML=leaderRows(KR_LEADERS,'₩');
-  updateTicker();
-  loadCryptoMetrics();
 }
 async function getBtcUsd(){
   try{ const d=await (await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd')).json(); return d.bitcoin.usd; }catch(e){ return null; }
@@ -470,7 +509,7 @@ function renderNewsList(){
   $('news').innerHTML=html;
 }
 
-/* ---------- 미국주식 급등락 (대표 대형주 80, Yahoo 묶음 시세) ---------- */
+/* ---------- 미국주식 급등락 (대표 대형주 30, 시장지표와 같은 Yahoo 묶음 시세) ---------- */
 function getFmpKey(){ return readSaved('fmpKey'); }
 function saveFmpKey(){
   const el=document.getElementById('fmpInput'); if(!el) return;
@@ -544,79 +583,50 @@ function renderFmpRows(arr){
   }).join('');
 }
 const US_LARGE_CAPS=[
-  ['AAPL','Apple'],['MSFT','Microsoft'],['NVDA','NVIDIA'],['AMZN','Amazon'],['GOOGL','Alphabet'],['META','Meta Platforms'],
-  ['AVGO','Broadcom'],['BRK-B','Berkshire Hathaway'],['TSLA','Tesla'],['JPM','JPMorgan Chase'],['WMT','Walmart'],['LLY','Eli Lilly'],
-  ['V','Visa'],['ORCL','Oracle'],['MA','Mastercard'],['XOM','Exxon Mobil'],['NFLX','Netflix'],['COST','Costco'],['JNJ','Johnson & Johnson'],
-  ['HD','Home Depot'],['PG','Procter & Gamble'],['BAC','Bank of America'],['ABBV','AbbVie'],['KO','Coca-Cola'],['PLTR','Palantir'],
-  ['GE','GE Aerospace'],['CSCO','Cisco'],['AMD','AMD'],['IBM','IBM'],['PM','Philip Morris'],['UNH','UnitedHealth'],['CVX','Chevron'],
-  ['CRM','Salesforce'],['ABT','Abbott Laboratories'],['MCD','McDonald’s'],['LIN','Linde'],['DIS','Walt Disney'],['MRK','Merck'],
-  ['WFC','Wells Fargo'],['TMO','Thermo Fisher'],['CAT','Caterpillar'],['AXP','American Express'],['QCOM','Qualcomm'],['INTU','Intuit'],
-  ['AMGN','Amgen'],['GS','Goldman Sachs'],['ISRG','Intuitive Surgical'],['NOW','ServiceNow'],['RTX','RTX'],['VZ','Verizon'],
-  ['PEP','PepsiCo'],['BKNG','Booking Holdings'],['SPGI','S&P Global'],['TXN','Texas Instruments'],['DHR','Danaher'],['NEE','NextEra Energy'],
-  ['C','Citigroup'],['BLK','BlackRock'],['AMAT','Applied Materials'],['PFE','Pfizer'],['SCHW','Charles Schwab'],['BA','Boeing'],
-  ['LOW','Lowe’s'],['HON','Honeywell'],['GILD','Gilead Sciences'],['TJX','TJX Companies'],['UBER','Uber'],['SYK','Stryker'],
-  ['ADP','ADP'],['DE','Deere'],['COP','ConocoPhillips'],['PANW','Palo Alto Networks'],['MU','Micron'],['APP','AppLovin'],
-  ['LRCX','Lam Research'],['ANET','Arista Networks'],['CRWD','CrowdStrike'],['KLAC','KLA'],['MDLZ','Mondelez'],['SBUX','Starbucks']
-].map(([symbol,name])=>({symbol,name}));
-const US_MOVER_CACHE_KEY='usLargeCapMoversV2';
-let _usMoversLoading=false;
+  ['AAPL','Apple'],['MSFT','Microsoft'],['NVDA','NVIDIA'],['GOOGL','Alphabet'],['AMZN','Amazon'],['META','Meta Platforms'],
+  ['TSLA','Tesla'],['AVGO','Broadcom'],['BRK-B','Berkshire Hathaway'],['JPM','JPMorgan Chase'],['WMT','Walmart'],['LLY','Eli Lilly'],
+  ['V','Visa'],['MA','Mastercard'],['XOM','Exxon Mobil'],['COST','Costco'],['NFLX','Netflix'],['AMD','AMD'],['ORCL','Oracle'],
+  ['PLTR','Palantir'],['BAC','Bank of America'],['KO','Coca-Cola'],['PEP','PepsiCo'],['DIS','Walt Disney'],['QCOM','Qualcomm'],
+  ['IBM','IBM'],['CVX','Chevron'],['UNH','UnitedHealth'],['MCD','McDonald’s'],['HD','Home Depot']
+].map(([symbol,name])=>({symbol,sym:symbol,name}));
+const US_MOVER_CACHE_KEY='usLargeCapMoversV3';
 function readLocalJson(key){ try{return JSON.parse(localStorage.getItem(key)||'null');}catch(e){return null;} }
 function writeLocalJson(key,value){ try{localStorage.setItem(key,JSON.stringify(value));}catch(e){} }
-async function fetchLargeCapSpark(symbols){
-  const q=symbols.map(encodeURIComponent).join(',');
-  const target=`https://query1.finance.yahoo.com/v8/finance/spark?symbols=${q}&range=1d&interval=1d`;
-  const candidates=[...PROXIES().map(p=>p(target)),target];
-  for(const url of candidates){
-    try{
-      const r=await fetchT(url,9000);
-      if(!r.ok) continue;
-      const d=await r.json(), res=d.spark&&d.spark.result;
-      if(!Array.isArray(res)||!res.length) continue;
-      const map={};
-      for(const it of res){
-        const m=it.response&&it.response[0]&&it.response[0].meta;
-        if(!m||typeof m.regularMarketPrice!=='number') continue;
-        const prev=m.chartPreviousClose||m.previousClose;
-        if(prev) map[it.symbol]={price:m.regularMarketPrice,ch:((m.regularMarketPrice-prev)/prev)*100};
-      }
-      if(Object.keys(map).length>=30) return map;
-    }catch(e){}
-  }
-  return null;
-}
 async function loadUSStocks(){
   const cached=readLocalJson(US_MOVER_CACHE_KEY);
   if(cached?.gainers?.length&&cached?.losers?.length){
     $('us-gainers').innerHTML=renderFmpRows(cached.gainers);
     $('us-losers').innerHTML=renderFmpRows(cached.losers);
+  }else{
+    const loading='<div class="loading">시장지표와 함께 불러오는 중…</div>';
+    $('us-gainers').innerHTML=loading;
+    $('us-losers').innerHTML=loading;
   }
-  if(_usMoversLoading) return;
-  _usMoversLoading=true;
-  try{
-    const map=await fetchLargeCapSpark(US_LARGE_CAPS.map(x=>x.symbol));
-    if(!map) throw new Error('대형주 묶음 시세 없음');
-    const quotes=US_LARGE_CAPS.map(c=>{
-      const q=map[c.symbol];
-      return q?{symbol:c.symbol,name:c.name,price:q.price,changePercentage:q.ch}:null;
-    }).filter(Boolean);
-    if(quotes.length<30) throw new Error('대형주 시세 부족');
-    const gain=[...quotes].filter(q=>usPct(q)>0).sort((a,b)=>usPct(b)-usPct(a)).slice(0,10);
-    const lose=[...quotes].filter(q=>usPct(q)<0).sort((a,b)=>usPct(a)-usPct(b)).slice(0,10);
-    if(!gain.length||!lose.length) throw new Error('대형주 급등락 종목 부족');
-    const g=gain.map(q=>({...q,changesPercentage:usPct(q)}));
-    const l=lose.map(q=>({...q,changesPercentage:usPct(q)}));
-    $('us-gainers').innerHTML=renderFmpRows(g);
-    $('us-losers').innerHTML=renderFmpRows(l);
-    writeLocalJson(US_MOVER_CACHE_KEY,{gainers:g,losers:l,savedAt:Date.now()});
-  }catch(e){
-    if(!cached?.gainers?.length){
-      const msg='<div class="err">미국 대형주 시세 연결이 지연되고 있어요.<br><button class="refresh" onclick="loadUSStocks()" style="margin-top:8px">다시 시도</button></div>';
+}
+function renderUSMoversFromMetricCache(){
+  const quotes=US_LARGE_CAPS.map(c=>{
+    const q=_metricCache[c.sym];
+    return q?{symbol:c.symbol,name:c.name,price:q.price,changePercentage:q.ch}:null;
+  }).filter(Boolean);
+  if(quotes.length<15){
+    const cached=readLocalJson(US_MOVER_CACHE_KEY);
+    if(cached?.gainers?.length&&cached?.losers?.length){
+      $('us-gainers').innerHTML=renderFmpRows(cached.gainers);
+      $('us-losers').innerHTML=renderFmpRows(cached.losers);
+    }else{
+      const msg='<div class="err">미국 대형주 시세 연결이 지연되고 있어요.<br><button class="refresh" onclick="loadMetrics()" style="margin-top:8px">다시 시도</button></div>';
       $('us-gainers').innerHTML=msg;
       $('us-losers').innerHTML=msg;
     }
-  }finally{
-    _usMoversLoading=false;
+    return;
   }
+  const gain=[...quotes].filter(q=>usPct(q)>0).sort((a,b)=>usPct(b)-usPct(a)).slice(0,10);
+  const lose=[...quotes].filter(q=>usPct(q)<0).sort((a,b)=>usPct(a)-usPct(b)).slice(0,10);
+  const g=gain.map(q=>({...q,changesPercentage:usPct(q)}));
+  const l=lose.map(q=>({...q,changesPercentage:usPct(q)}));
+  $('us-gainers').innerHTML=g.length?renderFmpRows(g):'<div class="loading">상승한 대형주가 없어요.</div>';
+  $('us-losers').innerHTML=l.length?renderFmpRows(l):'<div class="loading">하락한 대형주가 없어요.</div>';
+  writeLocalJson(US_MOVER_CACHE_KEY,{gainers:g,losers:l,savedAt:Date.now()});
 }
 
 /* ---------- 국내주식 급등락: 보통주 + 거래대금 필터 ---------- */
@@ -984,7 +994,7 @@ async function loadAll(){
   const p=n=>String(n).padStart(2,'0');
   $('updated').textContent=`갱신: ${p(now.getHours())}:${p(now.getMinutes())}:${p(now.getSeconds())}`;
 }
-function manualRefresh(){ loadAll(); loadMetrics(); loadKRStocks(); loadNews(); loadUSStocks(); loadCalendar(); }
+function manualRefresh(){ loadAll(); loadMetrics(); loadKRStocks(); loadNews(); loadCalendar(); }
 
 /* ---------- 내 프록시 설정 ---------- */
 function saveProxy(){
@@ -1005,7 +1015,7 @@ updateProxyStatus();
 
 // 첫 로드 (프록시 요청을 시간차로 분산 → 동시 과부하 방지)
 loadAll();                       // 코인·공포탐욕
-loadUSStocks();                  // 미국주식 (FMP 직접)
+loadUSStocks();                  // 미국주식 마지막 성공값 즉시 표시
 setTimeout(loadCalendar, 800);   // 경제 캘린더
 setTimeout(loadCalendar, 20000); // 캘린더 재시도
 setTimeout(loadCalendar, 45000); // 캘린더 재시도
@@ -1022,5 +1032,4 @@ setInterval(loadAll,     60000);   // 코인·공포탐욕: 1분
 setInterval(loadMetrics, 120000);  // 지수·환율·원자재·크립토지표: 2분
 setInterval(loadKRStocks,180000);  // 국내주식: 3분
 setInterval(loadNews,    180000);  // 뉴스: 3분
-setInterval(loadUSStocks,600000);  // 미국주식: 10분 (무료 한도 절약)
 setInterval(loadCalendar,600000);  // 경제 캘린더: 10분 (발표값 갱신)
